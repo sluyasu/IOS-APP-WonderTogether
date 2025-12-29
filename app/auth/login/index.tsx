@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Heart, Plane, Sparkles, ChevronLeft } from 'lucide-react-native';
+import { Heart, Sparkles, ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -44,94 +44,121 @@ export default function LoginScreen() {
     return (
         <LinearGradient
             colors={['#fffbf0', '#fff1f2', '#f0f9ff']}
-            className="flex-1 px-6 pt-12 pb-6 justify-center"
+            style={{ flex: 1 }}
         >
-            <TouchableOpacity onPress={() => router.back()} className="absolute top-12 left-6 z-10 p-2 rounded-full bg-white/50">
-                <ChevronLeft size={24} color="#3d405b" />
-            </TouchableOpacity>
-
-            <View className="items-center mb-8">
-                <LinearGradient
-                    colors={['#e07a5f', '#fb7185']}
-                    className="w-16 h-16 rounded-full mb-4 items-center justify-center shadow-lg"
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
+            >
+                <ScrollView
+                    contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 60, paddingBottom: 24, justifyContent: 'center' }}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
                 >
-                    <Heart color="white" size={32} fill="white" />
-                </LinearGradient>
-                <Text className="text-3xl font-bold text-gray-800 font-serif">WanderTogether</Text>
-                <Text className="text-gray-500 mt-1">Welcome back, travelers</Text>
-            </View>
-
-            <View className="bg-white/80 backdrop-blur-md rounded-3xl shadow-xl p-8 border border-white/50 w-full">
-                <View className="space-y-4">
-                    <View>
-                        <Text className="text-gray-700 mb-2 font-medium">Email</Text>
-                        <TextInput
-                            value={email}
-                            onChangeText={setEmail}
-                            placeholder="you@example.com"
-                            autoCapitalize="none"
-                            keyboardType="email-address"
-                            className="h-12 rounded-xl border border-gray-200 bg-white px-4 text-gray-800 focus:border-terracotta"
-                        />
-                    </View>
-
-                    <View>
-                        <Text className="text-gray-700 mb-2 font-medium">Password</Text>
-                        <TextInput
-                            value={password}
-                            onChangeText={setPassword}
-                            secureTextEntry
-                            className="h-12 rounded-xl border border-gray-200 bg-white px-4 text-gray-800 focus:border-terracotta"
-                        />
-                    </View>
-
+                    {/* Back Button */}
                     <TouchableOpacity
-                        onPress={handleLogin}
-                        disabled={isLoading}
-                        className="mt-2"
+                        onPress={() => router.back()}
+                        style={{ position: 'absolute', top: 50, left: 24, zIndex: 10, padding: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.5)' }}
                     >
+                        <ChevronLeft size={24} color="#3d405b" />
+                    </TouchableOpacity>
+
+                    {/* Header */}
+                    <View style={{ alignItems: 'center', marginBottom: 40 }}>
                         <LinearGradient
                             colors={['#e07a5f', '#fb7185']}
-                            start={{ x: 0, y: 0.5 }}
-                            end={{ x: 1, y: 0.5 }}
-                            className="h-12 rounded-xl items-center justify-center shadow-lg flex-row gap-2"
+                            style={{ width: 72, height: 72, borderRadius: 36, marginBottom: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8 }}
                         >
-                            {isLoading ? (
-                                <View className="flex-row items-center gap-2">
-                                    <ActivityIndicator color="white" />
-                                    <Text className="text-white font-medium">Logging in...</Text>
-                                </View>
-                            ) : (
-                                <Text className="text-white font-medium text-lg">Sign In</Text>
-                            )}
+                            <Heart color="white" size={36} fill="white" />
                         </LinearGradient>
-                    </TouchableOpacity>
-                </View>
-
-                <View className="mt-4">
-                    <View className="relative items-center justify-center py-2">
-                        <View className="absolute w-full border-t border-gray-200" />
-                        <Text className="bg-white/80 px-2 text-xs uppercase text-gray-400">or</Text>
+                        <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#1f2937', fontFamily: 'serif', letterSpacing: 0.5 }}>WanderTogether</Text>
+                        <Text style={{ fontSize: 16, color: '#6b7280', marginTop: 4 }}>Welcome back, travelers</Text>
                     </View>
 
-                    <TouchableOpacity
-                        onPress={handleDemoMode}
-                        className="w-full h-11 mt-2 rounded-xl border border-terracotta/30 flex-row items-center justify-center bg-transparent active:bg-terracotta/5"
-                    >
-                        <Sparkles size={16} color="#e07a5f" className="mr-2" />
-                        <Text className="text-terracotta font-medium ml-2">Try Demo Mode</Text>
-                    </TouchableOpacity>
-                </View>
+                    {/* Login Form */}
+                    <View style={{ backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 12, padding: 28, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)', width: '100%' }}>
+                        <View style={{ gap: 20 }}>
+                            {/* Email Input */}
+                            <View>
+                                <Text style={{ color: '#374151', marginBottom: 8, fontWeight: '600', fontSize: 14 }}>Email</Text>
+                                <TextInput
+                                    value={email}
+                                    onChangeText={setEmail}
+                                    placeholder="you@example.com"
+                                    autoCapitalize="none"
+                                    keyboardType="email-address"
+                                    style={{ height: 50, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: 'white', paddingHorizontal: 16, color: '#1f2937', fontSize: 16 }}
+                                    placeholderTextColor="#9ca3af"
+                                />
+                            </View>
 
-                <View className="mt-6 flex-row justify-center">
-                    <Text className="text-sm text-gray-500">Don't have an account? </Text>
-                    <Link href="/auth/sign-up" asChild>
-                        <TouchableOpacity>
-                            <Text className="text-terracotta font-medium underline">Sign up</Text>
-                        </TouchableOpacity>
-                    </Link>
-                </View>
-            </View>
+                            {/* Password Input */}
+                            <View>
+                                <Text style={{ color: '#374151', marginBottom: 8, fontWeight: '600', fontSize: 14 }}>Password</Text>
+                                <TextInput
+                                    value={password}
+                                    onChangeText={setPassword}
+                                    secureTextEntry
+                                    placeholder="Enter your password"
+                                    style={{ height: 50, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: 'white', paddingHorizontal: 16, color: '#1f2937', fontSize: 16 }}
+                                    placeholderTextColor="#9ca3af"
+                                />
+                            </View>
+
+                            {/* Sign In Button */}
+                            <TouchableOpacity
+                                onPress={handleLogin}
+                                disabled={isLoading}
+                                style={{ marginTop: 8 }}
+                            >
+                                <LinearGradient
+                                    colors={['#e07a5f', '#fb7185']}
+                                    start={{ x: 0, y: 0.5 }}
+                                    end={{ x: 1, y: 0.5 }}
+                                    style={{ height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', shadowColor: '#e07a5f', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 }}
+                                >
+                                    {isLoading ? (
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <ActivityIndicator color="white" />
+                                            <Text style={{ color: 'white', fontWeight: '600', fontSize: 16 }}>Logging in...</Text>
+                                        </View>
+                                    ) : (
+                                        <Text style={{ color: 'white', fontWeight: '600', fontSize: 17 }}>Sign In</Text>
+                                    )}
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Divider */}
+                        <View style={{ marginTop: 24 }}>
+                            <View style={{ position: 'relative', alignItems: 'center', justifyContent: 'center', paddingVertical: 8 }}>
+                                <View style={{ position: 'absolute', width: '100%', borderTopWidth: 1, borderTopColor: '#e5e7eb' }} />
+                                <Text style={{ backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 8, fontSize: 12, textTransform: 'uppercase', color: '#9ca3af', fontWeight: '600' }}>or</Text>
+                            </View>
+
+                            {/* Demo Mode Button */}
+                            <TouchableOpacity
+                                onPress={handleDemoMode}
+                                style={{ width: '100%', height: 48, marginTop: 12, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(224, 122, 95, 0.3)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}
+                                activeOpacity={0.7}
+                            >
+                                <Sparkles size={18} color="#e07a5f" />
+                                <Text style={{ color: '#e07a5f', fontWeight: '600', marginLeft: 8, fontSize: 15 }}>Try Demo Mode</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Sign Up Link */}
+                        <View style={{ marginTop: 24, flexDirection: 'row', justifyContent: 'center' }}>
+                            <Text style={{ fontSize: 14, color: '#6b7280' }}>Don't have an account? </Text>
+                            <Link href="/auth/sign-up" asChild>
+                                <TouchableOpacity>
+                                    <Text style={{ color: '#e07a5f', fontWeight: '600', fontSize: 14 }}>Sign up</Text>
+                                </TouchableOpacity>
+                            </Link>
+                        </View>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </LinearGradient>
     );
 }

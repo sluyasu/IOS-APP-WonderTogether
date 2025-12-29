@@ -1,0 +1,451 @@
+import { supabase } from './supabase';
+
+// ============================================
+// Types
+// ============================================
+
+export interface Group {
+    id: string;
+    name: string;
+    join_code: string;
+    created_at: string;
+    created_by: string | null;
+    anniversary_date: string | null;
+    group_avatar_url: string | null;
+    group_type?: string;
+    updated_at: string;
+}
+
+export interface GroupMember {
+    id: string;
+    group_id: string;
+    user_id: string;
+    role: 'admin' | 'member';
+    joined_at: string;
+    is_active: boolean;
+}
+
+export interface Profile {
+    id: string;
+    full_name: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface GroupWithMembers extends Group {
+    members?: Profile[];
+}
+
+// ============================================
+// Join Code Generation
+// ============================================
+
+/**
+ * Generate a unique 8-character join code
+ * Uses only non-confusing characters (excludes 0/O, 1/I/l)
+ */
+export function generateJoinCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 8; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+}
+
+/**
+ * Validate join code format (8 alphanumeric characters)
+ */
+export function isValidJoinCode(code: string): boolean {
+    return /^[A-Z0-9]{8}$/.test(code.toUpperCase());
+}
+
+// ============================================
+// Group Operations
+// ============================================
+
+/**
+ * Create a new group
+ */
+export async function createGroup(data: {
+    name: string;
+    group_type?: 'couples' | 'family' | 'friends' | 'travel_buddies' | 'other';
+    description?: string;
+    anniversary_date?: string;
+    group_avatar_url?: string;
+}): Promise<{ group: Group | null; error: any }> {
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) throw new Error('Not authenticated');
+
+        // Create group
+        const { data: group, error: groupError } = await supabase
+            .from('groups')
+            .insert({
+                name: data.name,
+                join_code: generateJoinCode(),
+                created_by: session.user.id,
+                group_type: data.group_type || 'couples',
+                description: data.description || null,
+                anniversary_date: data.anniversary_date || null,
+                group_avatar_url: data.group_avatar_url || null,
+            })
+            .select()
+            .single();
+
+        if (groupError) throw groupError;
+
+        // Add creator as admin member
+        const { error: memberError } = await supabase
+            .from('group_members')
+            .insert({
+                group_id: group.id,
+                user_id: session.user.id,
+                role: 'admin',
+            });
+
+        if (memberError) throw memberError;
+
+        return { group, error: null };
+    } catch (error) {
+        console.error('Error creating group:', error);
+        return { group: null, error };
+    }
+}
+
+/**
+ * Delete a group (admin only)
+ */
+export async function deleteGroup(groupId: string): Promise<{ success: boolean; error: any }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        // Check if user is admin of this group
+        const { data: membership, error: memberError } = await supabase
+            .from('group_members')
+            .select('role')
+            .eq('group_id', groupId)
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .single();
+
+        if (memberError || !membership || membership.role !== 'admin') {
+            throw new Error('Only admins can delete groups');
+        }
+
+        // Delete the group (cascade will handle members)
+        const { error: deleteError } = await supabase
+            .from('groups')
+            .delete()
+            .eq('id', groupId);
+
+        if (deleteError) throw deleteError;
+
+        return { success: true, error: null };
+    } catch (error) {
+        console.error('Error deleting group:', error);
+        return { success: false, error };
+    }
+}
+
+/**
+ * Leave a group
+ */
+export async function leaveGroup(groupId: string): Promise<{ success: boolean; error: any }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        // Check if user is a  member of this group
+        const { data: membership, error: memberError } = await supabase
+            .from('group_members')
+            .select('role, group:groups(name)')
+            .eq('group_id', groupId)
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .single();
+
+        if (memberError || !membership) {
+            throw new Error('You are not a member of this group');
+        }
+
+        // Check if user has other groups
+        const { data: otherGroups, error: groupsError } = await supabase
+            .from('group_members')
+            .select('group_id')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .neq('group_id', groupId);
+
+        if (groupsError) throw groupsError;
+
+        if (!otherGroups || otherGroups.length === 0) {
+            throw new Error('You cannot leave your only group. Create or join another group first.');
+        }
+
+        // Remove user from group
+        const { error: leaveError } = await supabase
+            .from('group_members')
+            .delete()
+            .eq('group_id', groupId)
+            .eq('user_id', user.id);
+
+        if (leaveError) throw leaveError;
+
+        return { success: true, error: null };
+    } catch (error) {
+        console.error('Error leaving group:', error);
+        return { success: false, error };
+    }
+}
+
+
+/**
+        * Join an existing group using a join code
+        */
+export async function joinGroup(joinCode: string): Promise<{ group: Group | null; error: any }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        // Validate code format
+        if (!isValidJoinCode(joinCode)) {
+            throw new Error('Invalid code format');
+        }
+
+        // Find group by code
+        const { data: group, error: groupError } = await supabase
+            .from('groups')
+            .select('*')
+            .eq('join_code', joinCode.toUpperCase())
+            .single();
+
+        if (groupError || !group) {
+            throw new Error('Invalid join code');
+        }
+
+        // Check if user is already a member
+        const { data: existingMember } = await supabase
+            .from('group_members')
+            .select('*')
+            .eq('group_id', group.id)
+            .eq('user_id', user.id)
+            .single();
+
+        if (existingMember) {
+            // Reactivate if inactive
+            if (!existingMember.is_active) {
+                await supabase
+                    .from('group_members')
+                    .update({ is_active: true })
+                    .eq('id', existingMember.id);
+            }
+            return { group, error: null };
+        }
+
+        // Add user to group
+        const { error: memberError } = await supabase
+            .from('group_members')
+            .insert({
+                group_id: group.id,
+                user_id: user.id,
+                role: 'member',
+            });
+
+        if (memberError) throw memberError;
+
+        return { group, error: null };
+    } catch (error) {
+        console.error('Error joining group:', error);
+        return { group: null, error };
+    }
+}
+
+/**
+ * Get user's current group
+ */
+export async function getUserGroup(): Promise<{ group: Group | null; error: any }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        const { data, error } = await supabase
+            .from('group_members')
+            .select(`
+        group_id,
+        groups (*)
+    `)
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .single();
+
+        if (error) {
+            // No group found is not an error, just return null
+            if (error.code === 'PGRST116') {
+                return { group: null, error: null };
+            }
+            throw error;
+        }
+
+        return { group: data.groups as unknown as Group, error: null };
+    } catch (error) {
+        console.error('Error getting user group:', error);
+        return { group: null, error };
+    }
+}
+
+/**
+ * Get all members of a group with profiles
+ */
+export async function getGroupMembers(groupId: string): Promise<{ members: Profile[]; error: any }> {
+    try {
+        // First, get the group member records
+        const { data: memberRecords, error: membersError } = await supabase
+            .from('group_members')
+            .select('user_id, role, joined_at')
+            .eq('group_id', groupId)
+            .eq('is_active', true)
+            .order('joined_at', { ascending: true });
+
+        if (membersError) throw membersError;
+        if (!memberRecords || memberRecords.length === 0) {
+            return { members: [], error: null };
+        }
+
+        // Then, fetch profiles for those user IDs
+        const userIds = memberRecords.map(m => m.user_id);
+        const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+
+        if (profilesError) throw profilesError;
+
+        return { members: profiles || [], error: null };
+    } catch (error) {
+        console.error('Error getting group members:', error);
+        return { members: [], error };
+    }
+}
+
+/**
+ * Update group information
+ */
+export async function updateGroup(
+    groupId: string,
+    updates: Partial<Pick<Group, 'name' | 'anniversary_date' | 'group_avatar_url'>>
+): Promise<{ group: Group | null; error: any }> {
+    try {
+        const { data, error } = await supabase
+            .from('groups')
+            .update(updates)
+            .eq('id', groupId)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return { group: data, error: null };
+    } catch (error) {
+        console.error('Error updating group:', error);
+        return { group: null, error };
+    }
+}
+
+/**
+ * Calculate days since anniversary
+ */
+export function getDaysSinceAnniversary(anniversaryDate: string | null): number {
+    if (!anniversaryDate) return 0;
+
+    const anniversary = new Date(anniversaryDate);
+    const today = new Date();
+    const diffTime = Math.abs(today.getTime() - anniversary.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return diffDays;
+}
+
+// ============================================
+// Profile Operations
+// ============================================
+
+/**
+ * Get or create profile for current user
+ */
+export async function getUserProfile(): Promise<{ profile: Profile | null; error: any }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
+        if (error) {
+            // Profile doesn't exist, create it
+            if (error.code === 'PGRST116') {
+                const { data: newProfile, error: createError } = await supabase
+                    .from('profiles')
+                    .insert({
+                        id: user.id,
+                        display_name: user.email?.split('@')[0] || 'User',
+                    })
+                    .select()
+                    .single();
+
+                if (createError) throw createError;
+                return { profile: newProfile, error: null };
+            }
+            throw error;
+        }
+
+        return { profile: data, error: null };
+    } catch (error) {
+        console.error('Error getting user profile:', error);
+        return { profile: null, error };
+    }
+}
+
+/**
+ * Update user profile
+ */
+export async function updateProfile(
+    updates: Partial<Pick<Profile, 'full_name' | 'display_name' | 'avatar_url'>>
+): Promise<{ profile: Profile | null; error: any }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .update(updates)
+            .eq('id', user.id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return { profile: data, error: null };
+    } catch (error) {
+        console.error('Error updating profile:', error);
+        return { profile: null, error };
+    }
+}
+
+// ============================================
+// Helper: Check if user has a group
+// ============================================
+
+/**
+ * Check if current user is part of any group
+ */
+export async function userHasGroup(): Promise<boolean> {
+    const { group } = await getUserGroup();
+    return group !== null;
+}

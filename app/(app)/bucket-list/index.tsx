@@ -1,434 +1,370 @@
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, TextInput, Image, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
-import { LinearGradient } from 'expo-linear-gradient';
-import { supabase } from '../../../lib/supabase';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, Modal, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager } from 'react-native';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { Plus, MapPin, Star, Check, Trash2, Edit2, Sparkles, ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Plus, MapPin, Check, Trash2, Globe, Heart, X, Edit2, MoreHorizontal } from 'lucide-react-native';
+import { supabase } from '../../../lib/supabase';
+import { useGroup } from '../../../contexts/GroupContext';
+import { format } from 'date-fns';
+import { LinearGradient } from 'expo-linear-gradient';
 
-interface BucketListItem {
-    id: string;
-    destination: string;
-    country: string;
-    reason: string | null;
-    priority: number;
-    status: 'wishlist' | 'completed';
-    best_time_to_visit: string | null;
+if (Platform.OS === 'android') {
+    if (UIManager.setLayoutAnimationEnabledExperimental) {
+        UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
 }
 
 export default function BucketListScreen() {
     const router = useRouter();
+    const { currentGroup } = useGroup();
+    const [filter, setFilter] = useState<'all' | 'wishlist' | 'visited'>('all');
+
+    const [items, setItems] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [couple, setCouple] = useState<any>(null);
-    const [items, setItems] = useState<BucketListItem[]>([]);
-    const [filter, setFilter] = useState<'all' | 'wishlist' | 'completed'>('all');
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [editingItem, setEditingItem] = useState<BucketListItem | null>(null);
+
+    // Modal State
+    const [showModal, setShowModal] = useState(false);
+    const [editingItem, setEditingItem] = useState<any>(null);
+    const [formData, setFormData] = useState({ title: '', country: '', note: '', icon: '🌍' });
     const [saving, setSaving] = useState(false);
 
-    // Form state
-    const [destination, setDestination] = useState('');
-    const [country, setCountry] = useState('');
-    const [reason, setReason] = useState('');
-    const [priority, setPriority] = useState('2');
-    const [bestTime, setBestTime] = useState('');
-
     useEffect(() => {
-        fetchData();
-    }, []);
+        if (currentGroup?.id) fetchItems();
+    }, [currentGroup?.id]);
 
-    const fetchData = async () => {
-        setLoading(true);
+    const fetchItems = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                router.replace('/auth/login');
-                return;
-            }
-
-            const { data: coupleData } = await supabase
-                .from('couples')
+            const { data, error } = await supabase
+                .from('bucket_list_items')
                 .select('*')
-                .or(`partner1_id.eq.${user.id},partner2_id.eq.${user.id}`)
-                .single();
-            setCouple(coupleData);
+                .eq('group_id', currentGroup?.id)
+                .order('created_at', { ascending: false });
 
-            if (coupleData) {
-                const { data } = await supabase
-                    .from('bucket_list')
-                    .select('*')
-                    .eq('couple_id', coupleData.id)
-                    .order('priority', { ascending: false })
-                    .order('created_at', { ascending: false });
-
-                setItems(data || []);
-            }
+            if (error) throw error;
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setItems(data || []);
         } catch (error) {
-            console.error('Error fetching data:', error);
+            console.error('Error fetching bucket list:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    const resetForm = () => {
-        setDestination('');
-        setCountry('');
-        setReason('');
-        setPriority('2');
-        setBestTime('');
+    const openAddModal = () => {
         setEditingItem(null);
+        setFormData({ title: '', country: '', note: '', icon: '🌍' });
+        setShowModal(true);
     };
 
-    const openEditModal = (item: BucketListItem) => {
+    const openEditModal = (item: any) => {
         setEditingItem(item);
-        setDestination(item.destination);
-        setCountry(item.country);
-        setReason(item.reason || '');
-        setPriority(item.priority.toString());
-        setBestTime(item.best_time_to_visit || '');
-        setShowAddModal(true);
+        setFormData({
+            title: item.title,
+            country: item.country || '',
+            note: item.note || '',
+            icon: item.icon || '🌍'
+        });
+        setShowModal(true);
     };
 
     const handleSave = async () => {
-        if (!destination.trim() || !country.trim()) {
-            Alert.alert('Error', 'Please fill in destination and country');
+        if (!formData.title.trim()) return;
+
+        if (!currentGroup?.id) {
+            Alert.alert('Error', 'No active group found. Please restart the app.');
             return;
         }
 
         setSaving(true);
         try {
-            const itemData = {
-                couple_id: couple.id,
-                destination: destination.trim(),
-                country: country.trim(),
-                reason: reason.trim() || null,
-                priority: parseInt(priority),
-                best_time_to_visit: bestTime.trim() || null,
-                image_url: null,
-            };
-
             if (editingItem) {
-                await supabase.from('bucket_list').update(itemData).eq('id', editingItem.id);
+                // Update existing
+                const { error } = await supabase
+                    .from('bucket_list_items')
+                    .update({
+                        title: formData.title.trim(),
+                        country: formData.country.trim(),
+                        note: formData.note.trim(),
+                        icon: formData.icon
+                    })
+                    .eq('id', editingItem.id);
+                if (error) throw error;
             } else {
-                await supabase.from('bucket_list').insert(itemData);
+                // Create new
+                const { error } = await supabase
+                    .from('bucket_list_items')
+                    .insert({
+                        group_id: currentGroup?.id,
+                        title: formData.title.trim(),
+                        country: formData.country.trim(),
+                        note: formData.note.trim(),
+                        icon: formData.icon,
+                        is_completed: false
+                    });
+                if (error) throw error;
             }
 
-            setShowAddModal(false);
-            resetForm();
-            fetchData();
+            setShowModal(false);
+            fetchItems();
         } catch (error) {
-            console.error('Error saving:', error);
-            Alert.alert('Error', 'Failed to save destination');
+            console.error('Error saving bucket list item:', error);
+            Alert.alert('Error', 'Could not save destination. See console for details.');
         } finally {
             setSaving(false);
         }
     };
 
-    const toggleComplete = async (item: BucketListItem) => {
-        const newStatus = item.status === 'completed' ? 'wishlist' : 'completed';
-        await supabase
-            .from('bucket_list')
-            .update({
-                status: newStatus,
-                completed_at: newStatus === 'completed' ? new Date().toISOString() : null,
-            })
-            .eq('id', item.id);
-        fetchData();
+    const toggleVisited = async (id: string, currentStatus: boolean) => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setItems(items.map(i => i.id === id ? { ...i, is_completed: !currentStatus } : i));
+
+        try {
+            const { error } = await supabase
+                .from('bucket_list_items')
+                .update({ is_completed: !currentStatus })
+                .eq('id', id);
+
+            if (error) throw error;
+        } catch (error) {
+            console.error('Error updating status:', error);
+            fetchItems();
+        }
     };
 
     const deleteItem = async (id: string) => {
         Alert.alert(
-            'Delete Destination',
-            'Are you sure you want to remove this from your bucket list?',
+            "Delete Destination",
+            "Are you sure you want to remove this from your list?",
             [
-                { text: 'Cancel', style: 'cancel' },
+                { text: "Cancel", style: "cancel" },
                 {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        await supabase.from('bucket_list').delete().eq('id', id);
-                        fetchData();
-                    },
-                },
+                    text: "Delete", style: "destructive", onPress: async () => {
+                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                        setItems(items.filter(i => i.id !== id));
+                        await supabase.from('bucket_list_items').delete().eq('id', id);
+                    }
+                }
             ]
         );
     };
 
-    const filteredItems = items.filter((item) => {
-        if (filter === 'all') return true;
-        return item.status === filter;
+    const filteredItems = items.filter(item => {
+        if (filter === 'wishlist') return !item.is_completed;
+        if (filter === 'visited') return item.is_completed;
+        return true;
     });
 
-    const completedCount = items.filter(i => i.status === 'completed').length;
-    const totalCount = items.length;
-
-    if (loading) {
-        return (
-            <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1 items-center justify-center">
-                <ActivityIndicator size="large" color="#e07a5f" />
-            </LinearGradient>
-        );
-    }
-
     return (
-        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1">
-            <ScrollView className="flex-1 px-4 py-4">
-                {/* Header */}
-                <View className="flex-row items-center gap-3 mb-4">
-                    <TouchableOpacity onPress={() => router.back()} className="w-8 h-8 items-center justify-center">
-                        <ArrowLeft size={20} color="#3d405b" />
+        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1 }}>
+            {/* Minimalist Header */}
+            <View style={{ paddingTop: 20, paddingHorizontal: 20, paddingBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <ArrowLeft size={24} color="#3d405b" />
                     </TouchableOpacity>
-                    <View className="flex-1">
-                        <Text className="text-2xl font-bold text-gray-800">Dream Destinations</Text>
-                        <Text className="text-xs text-gray-600">
-                            {completedCount} of {totalCount} explored
-                        </Text>
-                    </View>
-                    <TouchableOpacity
-                        onPress={() => { resetForm(); setShowAddModal(true); }}
-                        className="bg-terracotta px-3 py-2 rounded-lg"
-                    >
-                        <Plus size={16} color="white" />
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#3d405b', textTransform: 'uppercase', letterSpacing: 1 }}>Bucket List</Text>
+                    <TouchableOpacity onPress={openAddModal} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Plus size={24} color="#e07a5f" />
                     </TouchableOpacity>
                 </View>
 
-                {/* Progress Bar */}
-                {totalCount > 0 && (
-                    <View className="mb-4">
-                        <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <View
-                                className="h-full bg-gradient-to-r from-terracotta to-amber-500 rounded-full"
-                                style={{ width: `${(completedCount / totalCount) * 100}%` }}
-                            />
-                        </View>
-                        <Text className="text-xs text-center text-gray-600 mt-1">
-                            {Math.round((completedCount / totalCount) * 100)}% of your dream list complete!
-                        </Text>
-                    </View>
-                )}
-
-                {/* Filter Tabs */}
-                <View className="flex-row gap-2 mb-4">
-                    {(['all', 'wishlist', 'completed'] as const).map((f) => (
+                {/* Clean Tabs */}
+                <View style={{ flexDirection: 'row', gap: 24, paddingVertical: 8 }}>
+                    {['all', 'wishlist', 'visited'].map((t) => (
                         <TouchableOpacity
-                            key={f}
-                            onPress={() => setFilter(f)}
-                            className={`px-4 py-2 rounded-full ${filter === f ? 'bg-terracotta' : 'bg-white'
-                                }`}
+                            key={t}
+                            onPress={() => {
+                                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                setFilter(t as any);
+                            }}
+                            style={{
+                                paddingBottom: 8,
+                                borderBottomWidth: 2,
+                                borderBottomColor: filter === t ? '#e07a5f' : 'transparent'
+                            }}
                         >
-                            <Text className={`text-xs font-semibold capitalize ${filter === f ? 'text-white' : 'text-gray-700'
-                                }`}>
-                                {f === 'all' ? 'All' : f === 'wishlist' ? 'Wishlist' : 'Visited'}
+                            <Text style={{
+                                fontSize: 16,
+                                fontWeight: filter === t ? '600' : '400',
+                                color: filter === t ? '#1f2937' : '#9ca3af',
+                                textTransform: 'capitalize'
+                            }}>
+                                {t}
                             </Text>
                         </TouchableOpacity>
                     ))}
                 </View>
+            </View>
 
-                {/* Empty State */}
-                {filteredItems.length === 0 && (
-                    <View className="items-center justify-center py-12">
-                        <View className="w-16 h-16 rounded-full bg-terracotta/10 items-center justify-center mb-4">
-                            <MapPin size={32} color="#e07a5f" />
-                        </View>
-                        <Text className="text-lg font-semibold text-gray-800 mb-2">No destinations yet</Text>
-                        <Text className="text-sm text-gray-600 mb-4 text-center px-8">
-                            Start adding your dream destinations to explore together!
-                        </Text>
-                        <TouchableOpacity
-                            onPress={() => setShowAddModal(true)}
-                            className="bg-terracotta px-6 py-3 rounded-xl flex-row items-center gap-2"
-                        >
-                            <Plus size={16} color="white" />
-                            <Text className="text-white font-semibold">Add First Destination</Text>
-                        </TouchableOpacity>
+            <ScrollView contentContainerStyle={{ padding: 20 }}>
+                {loading ? (
+                    <ActivityIndicator color="#e07a5f" style={{ marginTop: 40 }} />
+                ) : filteredItems.length === 0 ? (
+                    <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 100, opacity: 0.5 }}>
+                        <Globe size={48} color="#d1d5db" />
+                        <Text style={{ marginTop: 16, color: '#9ca3af', fontSize: 16 }}>No destinations here yet</Text>
                     </View>
-                )}
-
-                {/* Bucket List Grid */}
-                <View className="flex-row flex-wrap gap-3">
-                    {filteredItems.map((item) => (
-                        <View key={item.id} className="w-[48%]">
-                            <View className="bg-white rounded-2xl shadow-md overflow-hidden">
-                                {/* Image Placeholder */}
-                                <View className="aspect-[4/3] bg-gradient-to-br from-terracotta/20 to-amber-100 relative">
-                                    <LinearGradient
-                                        colors={['#e07a5f20', '#f2cc8f40']}
-                                        className="absolute inset-0 items-center justify-center"
-                                    >
-                                        <Text className="text-5xl">🌍</Text>
-                                    </LinearGradient>
-
-                                    {/* Priority Stars */}
-                                    <View className="absolute top-2 left-2 flex-row gap-0.5">
-                                        {Array.from({ length: item.priority }).map((_, i) => (
-                                            <Star key={i} size={12} color="#f2cc8f" fill="#f2cc8f" />
-                                        ))}
-                                    </View>
-
-                                    {/* Action Buttons */}
-                                    <View className="absolute top-2 right-2 flex-row gap-1">
-                                        <TouchableOpacity
-                                            onPress={() => openEditModal(item)}
-                                            className="w-6 h-6 bg-white/90 rounded-full items-center justify-center"
-                                        >
-                                            <Edit2 size={12} color="#3d405b" />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={() => deleteItem(item.id)}
-                                            className="w-6 h-6 bg-white/90 rounded-full items-center justify-center"
-                                        >
-                                            <Trash2 size={12} color="#ef4444" />
-                                        </TouchableOpacity>
-                                    </View>
-
-                                    {/* Completed Badge */}
-                                    {item.status === 'completed' && (
-                                        <View className="absolute inset-0 bg-emerald-500/20 items-center justify-center">
-                                            <View className="w-12 h-12 bg-emerald-500 rounded-full items-center justify-center">
-                                                <Check size={24} color="white" />
-                                            </View>
-                                        </View>
+                ) : (
+                    <View style={{ gap: 12 }}>
+                        {filteredItems.map((item) => (
+                            <TouchableOpacity
+                                key={item.id}
+                                onPress={() => openEditModal(item)}
+                                activeOpacity={0.7}
+                                style={{
+                                    backgroundColor: 'white',
+                                    borderRadius: 16,
+                                    padding: 16,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 16,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 1 },
+                                    shadowOpacity: 0.05,
+                                    shadowRadius: 2,
+                                    elevation: 1,
+                                    opacity: item.is_completed ? 0.8 : 1
+                                }}
+                            >
+                                {/* Emoji Icon Box */}
+                                <View style={{
+                                    width: 48,
+                                    height: 48,
+                                    borderRadius: 12,
+                                    backgroundColor: item.is_completed ? '#ecfdf5' : '#fff7ed',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}>
+                                    {item.is_completed ? (
+                                        <Check size={24} color="#10b981" />
+                                    ) : (
+                                        <Text style={{ fontSize: 24 }}>{item.icon || '🌍'}</Text>
                                     )}
                                 </View>
 
                                 {/* Content */}
-                                <View className="p-3">
-                                    <Text className="text-sm font-bold text-gray-800 mb-0.5" numberOfLines={1}>
-                                        {item.destination}
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{
+                                        fontSize: 16,
+                                        fontWeight: '600',
+                                        color: item.is_completed ? '#9ca3af' : '#1f2937',
+                                        textDecorationLine: item.is_completed ? 'line-through' : 'none'
+                                    }}>
+                                        {item.title}
                                     </Text>
-                                    <View className="flex-row items-center gap-1 mb-1">
-                                        <MapPin size={10} color="#9ca3af" />
-                                        <Text className="text-xs text-gray-600">{item.country}</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                                        <MapPin size={12} color="#9ca3af" />
+                                        <Text style={{ fontSize: 13, color: '#6b7280' }}>
+                                            {item.country || 'Unknown'}
+                                            {item.note ? ` • ${item.note}` : ''}
+                                        </Text>
                                     </View>
-                                    {item.reason && (
-                                        <Text className="text-xs text-gray-500 mb-2" numberOfLines={2}>
-                                            {item.reason}
-                                        </Text>
-                                    )}
-                                    {item.best_time_to_visit && (
-                                        <View className="bg-amber-100 px-2 py-1 rounded-full flex-row items-center gap-1 mb-2 self-start">
-                                            <Sparkles size={10} color="#f59e0b" />
-                                            <Text className="text-[10px] text-amber-700 font-medium">
-                                                {item.best_time_to_visit}
-                                            </Text>
-                                        </View>
-                                    )}
-                                    <TouchableOpacity
-                                        onPress={() => toggleComplete(item)}
-                                        className="bg-gray-100 rounded-lg px-3 py-2 items-center"
-                                    >
-                                        <Text className="text-xs text-gray-700 font-medium">
-                                            {item.status === 'completed' ? 'Mark as Wishlist' : 'Mark as Visited'}
-                                        </Text>
-                                    </TouchableOpacity>
                                 </View>
-                            </View>
-                        </View>
-                    ))}
-                </View>
+
+                                {/* Actions */}
+                                <TouchableOpacity
+                                    onPress={() => toggleVisited(item.id, item.is_completed)}
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        borderRadius: 16,
+                                        borderWidth: 1,
+                                        borderColor: item.is_completed ? '#10b981' : '#e5e7eb',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        backgroundColor: item.is_completed ? '#ecfdf5' : 'transparent'
+                                    }}
+                                >
+                                    {item.is_completed && <Check size={14} color="#10b981" strokeWidth={3} />}
+                                </TouchableOpacity>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
             </ScrollView>
 
-            {/* Add/Edit Modal */}
-            <Modal visible={showAddModal} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-white rounded-t-3xl p-6" style={{ maxHeight: '85%' }}>
-                        <Text className="text-xl font-bold text-gray-800 mb-4">
-                            {editingItem ? 'Edit Destination' : 'Add Dream Destination'}
-                        </Text>
+            {/* Same Modal Logic - Styled to match */}
+            <Modal visible={showModal} animationType="slide" transparent>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937' }}>{editingItem ? 'Edit Item' : 'New Adventure'}</Text>
+                            <TouchableOpacity onPress={() => setShowModal(false)} style={{ padding: 4 }}>
+                                <X size={24} color="#9ca3af" />
+                            </TouchableOpacity>
+                        </View>
 
-                        <ScrollView showsVerticalScrollIndicator={false}>
-                            <View className="gap-4">
-                                {/* Destination */}
-                                <View>
-                                    <Text className="text-sm text-gray-700 mb-1 font-medium">Destination</Text>
+                        <View style={{ gap: 16 }}>
+                            <View>
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#6b7280', marginBottom: 8, textTransform: 'uppercase' }}>Title</Text>
+                                <TextInput
+                                    placeholder="e.g. See Northern Lights"
+                                    style={{ backgroundColor: '#f9fafb', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', fontSize: 16 }}
+                                    value={formData.title}
+                                    onChangeText={(t) => setFormData({ ...formData, title: t })}
+                                />
+                            </View>
+
+                            <View style={{ flexDirection: 'row', gap: 12 }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#6b7280', marginBottom: 8, textTransform: 'uppercase' }}>Location (Optional)</Text>
                                     <TextInput
-                                        value={destination}
-                                        onChangeText={setDestination}
-                                        placeholder="e.g., Santorini"
-                                        className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
+                                        placeholder="e.g. Iceland"
+                                        style={{ backgroundColor: '#f9fafb', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', fontSize: 16 }}
+                                        value={formData.country}
+                                        onChangeText={(t) => setFormData({ ...formData, country: t })}
                                     />
                                 </View>
-
-                                {/* Country */}
-                                <View>
-                                    <Text className="text-sm text-gray-700 mb-1 font-medium">Country</Text>
+                                <View style={{ width: 80 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#6b7280', marginBottom: 8, textTransform: 'uppercase' }}>Icon</Text>
                                     <TextInput
-                                        value={country}
-                                        onChangeText={setCountry}
-                                        placeholder="e.g., Greece"
-                                        className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
-                                    />
-                                </View>
-
-                                {/* Reason */}
-                                <View>
-                                    <Text className="text-sm text-gray-700 mb-1 font-medium">Why do you want to go?</Text>
-                                    <TextInput
-                                        value={reason}
-                                        onChangeText={setReason}
-                                        placeholder="The beautiful sunsets and romantic vibes..."
-                                        multiline
-                                        numberOfLines={3}
-                                        className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
-                                        textAlignVertical="top"
-                                    />
-                                </View>
-
-                                {/* Priority & Best Time */}
-                                <View className="flex-row gap-3">
-                                    <View className="flex-1">
-                                        <Text className="text-sm text-gray-700 mb-1 font-medium">Priority</Text>
-                                        <View className="flex-row gap-2">
-                                            {['1', '2', '3'].map((p) => (
-                                                <TouchableOpacity
-                                                    key={p}
-                                                    onPress={() => setPriority(p)}
-                                                    className={`flex-1 border-2 rounded-xl px-3 py-2 items-center ${priority === p ? 'border-terracotta bg-terracotta/10' : 'border-gray-200'
-                                                        }`}
-                                                >
-                                                    <Text className={`text-xs font-semibold ${priority === p ? 'text-terracotta' : 'text-gray-600'
-                                                        }`}>
-                                                        {p} ⭐
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-                                    </View>
-                                </View>
-
-                                {/* Best Time */}
-                                <View>
-                                    <Text className="text-sm text-gray-700 mb-1 font-medium">Best Time to Visit</Text>
-                                    <TextInput
-                                        value={bestTime}
-                                        onChangeText={setBestTime}
-                                        placeholder="e.g., Spring"
-                                        className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
+                                        placeholder="✨"
+                                        style={{ backgroundColor: '#f9fafb', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', fontSize: 16, textAlign: 'center' }}
+                                        value={formData.icon}
+                                        onChangeText={(t) => setFormData({ ...formData, icon: t })}
+                                        maxLength={2}
                                     />
                                 </View>
                             </View>
 
-                            {/* Buttons */}
-                            <View className="flex-row gap-3 mt-6">
-                                <TouchableOpacity
-                                    onPress={() => { setShowAddModal(false); resetForm(); }}
-                                    className="flex-1 border border-gray-300 rounded-xl px-4 py-3 items-center"
-                                >
-                                    <Text className="text-gray-700 font-semibold">Cancel</Text>
-                                </TouchableOpacity>
+                            <View>
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#6b7280', marginBottom: 8, textTransform: 'uppercase' }}>Note (Optional)</Text>
+                                <TextInput
+                                    placeholder="Why do you want to go?"
+                                    style={{ backgroundColor: '#f9fafb', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', fontSize: 16, minHeight: 80 }}
+                                    multiline
+                                    textAlignVertical="top"
+                                    value={formData.note}
+                                    onChangeText={(t) => setFormData({ ...formData, note: t })}
+                                />
+                            </View>
+
+                            <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                                {editingItem && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setShowModal(false);
+                                            deleteItem(editingItem.id);
+                                        }}
+                                        style={{ padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#fee2e2', alignItems: 'center' }}
+                                    >
+                                        <Trash2 size={24} color="#ef4444" />
+                                    </TouchableOpacity>
+                                )}
                                 <TouchableOpacity
                                     onPress={handleSave}
-                                    disabled={saving || !destination.trim() || !country.trim()}
-                                    className={`flex-1 rounded-xl px-4 py-3 items-center ${saving || !destination.trim() || !country.trim()
-                                            ? 'bg-gray-300'
-                                            : 'bg-terracotta'
-                                        }`}
+                                    disabled={saving}
+                                    style={{ flex: 1, backgroundColor: '#e07a5f', padding: 16, borderRadius: 12, alignItems: 'center' }}
                                 >
-                                    <Text className="text-white font-semibold">
-                                        {saving ? 'Saving...' : editingItem ? 'Update' : 'Add to List'}
-                                    </Text>
+                                    {saving ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
+                                            {editingItem ? 'Save Changes' : 'Add to List'}
+                                        </Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
-                        </ScrollView>
+                        </View>
                     </View>
                 </View>
             </Modal>

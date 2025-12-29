@@ -1,77 +1,144 @@
-import { View, Text, TouchableOpacity } from "react-native";
-import { Link } from "expo-router";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import { Link, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Heart, Plane, MapPin, Camera } from "lucide-react-native";
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
 
 export default function LandingPage() {
+    const router = useRouter();
+    const [checking, setChecking] = useState(true);
+
+    useEffect(() => {
+        console.log('LandingPage: Starting auth check...');
+        // Check if user is already authenticated
+        const checkAuth = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                console.log('LandingPage: Session check result:', session ? 'Logged in' : 'Not logged in');
+                if (session) {
+                    // User is logged in, check if they have any groups
+                    console.log('LandingPage: Checking for groups...');
+
+                    const { data: userGroups, error: groupsError } = await supabase
+                        .from('group_members')
+                        .select('group_id')
+                        .eq('user_id', session.user.id)
+                        .eq('is_active', true);
+
+                    if (groupsError) {
+                        console.error('LandingPage: Error fetching groups:', groupsError);
+                        // On error, still redirect to app and let it handle
+                        router.replace('/(app)');
+                    } else if (!userGroups || userGroups.length === 0) {
+                        // No groups, go directly to onboarding
+                        console.log('LandingPage: No groups found, redirecting to onboarding');
+                        router.replace('/group-onboarding');
+                    } else {
+                        // Has groups, go to app
+                        console.log('LandingPage: Groups found, redirecting to app');
+                        router.replace('/(app)');
+                    }
+                } else {
+                    // Not logged in, show landing page
+                    console.log('LandingPage: Showing landing page');
+                    setChecking(false);
+                }
+            } catch (error: any) {
+                console.error('LandingPage: Error checking auth:', error);
+                // On any error, show landing page
+                setChecking(false);
+            }
+        };
+        checkAuth();
+    }, [router]);
+
+    console.log('LandingPage: Rendering, checking=', checking);
+
+    if (checking) {
+        return (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fffbf0' }}>
+                <ActivityIndicator size="large" color="#e07a5f" />
+                <Text style={{ marginTop: 20, color: '#000' }}>Loading...</Text>
+            </View>
+        );
+    }
+
     return (
         <LinearGradient
-            colors={['#fffbf0', '#fff1f2', '#f0f9ff']} // approximate amber-50, rose-50, sky-50
+            colors={['#fffbf0', '#fff1f2', '#f0f9ff']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            className="flex-1"
+            style={{ flex: 1 }}
         >
-            <View className="flex-1 items-center justify-center p-6 bg-transparent">
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
                 {/* Logo */}
                 <LinearGradient
-                    colors={['#e07a5f', '#fb7185']} // terracotta to rose-400
-                    className="w-20 h-20 rounded-full mb-6 items-center justify-center shadow-lg"
+                    colors={['#e07a5f', '#fb7185']}
+                    style={{
+                        width: 80,
+                        height: 80,
+                        borderRadius: 40,
+                        marginBottom: 24,
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
                 >
                     <Heart color="white" size={40} fill="white" />
                 </LinearGradient>
 
-                <Text className="text-4xl text-gray-800 font-bold mb-4 text-center">
+                <Text style={{ fontSize: 36, color: '#1f2937', fontWeight: 'bold', marginBottom: 16, textAlign: 'center' }}>
                     WanderTogether
                 </Text>
-                <Text className="text-gray-500 text-lg mb-8 text-center max-w-xs">
+                <Text style={{ color: '#6b7280', fontSize: 18, marginBottom: 32, textAlign: 'center', maxWidth: 300 }}>
                     Plan romantic adventures, discover destinations, and create memories with your travel partner.
                 </Text>
 
                 {/* Features */}
-                <View className="flex-row justify-between w-full max-w-sm mb-10 gap-4">
-                    <View className="items-center gap-2 flex-1">
-                        <View className="w-12 h-12 rounded-full bg-white shadow-md items-center justify-center">
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', maxWidth: 350, marginBottom: 40, gap: 16 }}>
+                    <View style={{ alignItems: 'center', gap: 8, flex: 1 }}>
+                        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'white', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, alignItems: 'center', justifyContent: 'center' }}>
                             <Plane color="#e07a5f" size={24} />
                         </View>
-                        <Text className="text-xs text-gray-500">Discover</Text>
+                        <Text style={{ fontSize: 12, color: '#6b7280' }}>Discover</Text>
                     </View>
-                    <View className="items-center gap-2 flex-1">
-                        <View className="w-12 h-12 rounded-full bg-white shadow-md items-center justify-center">
+                    <View style={{ alignItems: 'center', gap: 8, flex: 1 }}>
+                        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'white', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, alignItems: 'center', justifyContent: 'center' }}>
                             <MapPin color="#e07a5f" size={24} />
                         </View>
-                        <Text className="text-xs text-gray-500">Explore</Text>
+                        <Text style={{ fontSize: 12, color: '#6b7280' }}>Explore</Text>
                     </View>
-                    <View className="items-center gap-2 flex-1">
-                        <View className="w-12 h-12 rounded-full bg-white shadow-md items-center justify-center">
+                    <View style={{ alignItems: 'center', gap: 8, flex: 1 }}>
+                        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'white', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, alignItems: 'center', justifyContent: 'center' }}>
                             <Camera color="#e07a5f" size={24} />
                         </View>
-                        <Text className="text-xs text-gray-500">Remember</Text>
+                        <Text style={{ fontSize: 12, color: '#6b7280' }}>Remember</Text>
                     </View>
                 </View>
 
                 {/* CTA Buttons */}
-                <View className="w-full max-w-xs gap-3">
+                <View style={{ width: '100%', maxWidth: 300, gap: 12 }}>
                     <Link href="/auth/sign-up" asChild>
                         <TouchableOpacity>
                             <LinearGradient
                                 colors={['#e07a5f', '#fb7185']}
                                 start={{ x: 0, y: 0.5 }}
                                 end={{ x: 1, y: 0.5 }}
-                                className="h-12 rounded-xl items-center justify-center shadow-lg"
+                                style={{ height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
                             >
-                                <Text className="text-white font-medium text-lg">Get Started</Text>
+                                <Text style={{ color: 'white', fontWeight: '500', fontSize: 18 }}>Get Started</Text>
                             </LinearGradient>
                         </TouchableOpacity>
                     </Link>
 
                     <Link href="/auth/login" asChild>
-                        <TouchableOpacity className="h-12 rounded-xl border-2 border-terracotta items-center justify-center bg-transparent active:bg-terracotta/10">
-                            <Text className="text-terracotta font-medium text-lg">Sign In</Text>
+                        <TouchableOpacity style={{ height: 48, borderRadius: 12, borderWidth: 2, borderColor: '#e07a5f', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}>
+                            <Text style={{ color: '#e07a5f', fontWeight: '500', fontSize: 18 }}>Sign In</Text>
                         </TouchableOpacity>
                     </Link>
                 </View>
 
-                <Text className="text-xs text-stone-400 mt-8">
+                <Text style={{ fontSize: 12, color: '#a8a29e', marginTop: 32 }}>
                     Made with love for couples who love to travel
                 </Text>
             </View>

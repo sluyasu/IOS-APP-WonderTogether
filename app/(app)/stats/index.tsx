@@ -1,10 +1,14 @@
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Globe, MapPin, Camera, CalendarDays, Heart, TrendingUp, ArrowLeft, Trophy } from 'lucide-react-native';
 import { differenceInDays, differenceInYears } from 'date-fns';
+import AchievementNotification from '../../../components/AchievementNotification';
+import { getSeenAchievements, getNewlyUnlocked, markAchievementAsSeen, Achievement } from '../../../lib/achievementStorage';
+import { isTripCompleted, isTripPlanned } from '../../../lib/tripUtils';
 
 const achievementDefinitions = [
     { id: 'first-trip', name: 'First Trip', icon: '✈️', target: 1, metric: 'trips' },
@@ -34,66 +38,197 @@ export default function StatsScreen() {
         favoriteCountry: 'None yet',
     });
 
+    // Achievement notification state
+    const [currentAchievement, setCurrentAchievement] = useState<Achievement | null>(null);
+    const [showNotification, setShowNotification] = useState(false);
+    const [achievementQueue, setAchievementQueue] = useState<Achievement[]>([]);
+
     useEffect(() => {
         fetchData();
     }, []);
 
+    // Mark achievements as seen when visiting stats screen
+    useFocusEffect(
+        React.useCallback(() => {
+            const markAllAsSeen = async () => {
+                // When user visits stats screen, mark all visible achievements as seen
+                const seenIds = await getSeenAchievements();
+                // We'll mark them after showing notification
+            };
+            markAllAsSeen();
+        }, [])
+    );
+
+    // Check for newly unlocked achievements
+    const checkAchievements = async (currentStats: {
+        trips: number;
+        countries: number;
+        photos: number;
+        bucketCompleted: number;
+        daysTogether: number;
+    }) => {
+        try {
+            // Calculate which achievements are unlocked
+            const unlockedAchievements: Achievement[] = [];
+            achievementDefinitions.forEach((def) => {
+                let progress = 0;
+                switch (def.metric) {
+                    case 'trips':
+                        progress = currentStats.trips;
+                        break;
+                    case 'countries':
+                        progress = currentStats.countries;
+                        break;
+                    case 'photos':
+                        progress = currentStats.photos;
+                        break;
+                    case 'bucketCompleted':
+                        progress = currentStats.bucketCompleted;
+                        break;
+                    case 'daysTogether':
+                        progress = currentStats.daysTogether;
+                        break;
+                }
+
+                if (progress >= def.target) {
+                    unlockedAchievements.push({
+                        ...def,
+                        progress,
+                        unlocked: true,
+                    });
+                }
+            });
+
+            // Get seen achievements
+            const seenIds = await getSeenAchievements();
+            const newlyUnlocked = getNewlyUnlocked(unlockedAchievements, seenIds);
+
+            if (newlyUnlocked.length > 0) {
+                // Add to queue and show first one
+                setAchievementQueue(newlyUnlocked);
+                setCurrentAchievement(newlyUnlocked[0]);
+                setShowNotification(true);
+            }
+        } catch (error) {
+            console.error('Error checking achievements:', error);
+        }
+    };
+
+    // Handle dismissing achievement notification
+    const handleDismissAchievement = async () => {
+        if (currentAchievement) {
+            // Mark as seen
+            await markAchievementAsSeen(currentAchievement.id);
+
+            // Hide notification
+            setShowNotification(false);
+
+            // Show next achievement in queue after a brief delay
+            setTimeout(() => {
+                const remainingQueue = achievementQueue.slice(1);
+                if (remainingQueue.length > 0) {
+                    setCurrentAchievement(remainingQueue[0]);
+                    setAchievementQueue(remainingQueue);
+                    setShowNotification(true);
+                } else {
+                    setCurrentAchievement(null);
+                    setAchievementQueue([]);
+                }
+            }, 500);
+        }
+    };
+
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.user) {
                 router.replace('/auth/login');
                 return;
             }
 
-            const { data: coupleData } = await supabase
-                .from('couples')
-                .select('*')
-                .or(`partner1_id.eq.${user.id},partner2_id.eq.${user.id}`)
+            // Get user's group
+            const { data: groupMember } = await supabase
+                .from('group_members')
+                .select('group_id, groups(*)')
+                .eq('user_id', session.user.id)
+                .eq('is_active', true)
                 .single();
-            setCouple(coupleData);
 
-            if (coupleData) {
-                const { data: trips } = await supabase.from('trips').select('*').eq('couple_id', coupleData.id);
-                const { data: memories } = await supabase.from('memories').select('*').eq('couple_id', coupleData.id);
-                const { data: bucketList } = await supabase.from('bucket_list').select('*').eq('couple_id', coupleData.id);
-                const { data: events } = await supabase.from('events').select('*').eq('couple_id', coupleData.id);
+            if (!groupMember || !groupMember.groups) {
+                setLoading(false);
+                return;
+            }
 
-                if (trips) {
-                    const completed = trips.filter((t: any) => t.status === 'completed');
-                    const planned = trips.filter((t: any) => t.status === 'planned' || t.status === 'confirmed');
-                    const countries = [...new Set(trips.map((t: any) => t.country).filter(Boolean))];
+            const group: any = groupMember.groups;
+            setCouple(group);
 
-                    let totalDays = 0;
-                    let longestTrip = 0;
-                    completed.forEach((trip: any) => {
-                        const days = differenceInDays(new Date(trip.end_date), new Date(trip.start_date)) + 1;
-                        totalDays += days;
-                        if (days > longestTrip) longestTrip = days;
-                    });
+            // Fetch trips for this group
+            const { data: trips } = await supabase
+                .from('trips')
+                .select('*')
+                .eq('group_id', group.id);
 
-                    const countryCount: Record<string, number> = {};
-                    trips.forEach((t: any) => {
-                        if (t.country) {
-                            countryCount[t.country] = (countryCount[t.country] || 0) + 1;
-                        }
-                    });
-                    const favoriteCountry = Object.entries(countryCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None yet';
+            // Fetch memories for this group  
+            const { data: memories } = await supabase
+                .from('memories')
+                .select('*')
+                .eq('group_id', group.id);
 
-                    setStats({
-                        tripsCompleted: completed.length,
-                        tripsPlanned: planned.length,
-                        countriesVisited: countries,
-                        photosCount: memories?.length || 0,
-                        daysAdventuring: totalDays,
-                        bucketListTotal: bucketList?.length || 0,
-                        bucketListCompleted: bucketList?.filter((b: any) => b.status === 'completed').length || 0,
-                        eventsCount: events?.length || 0,
-                        longestTrip,
-                        favoriteCountry,
-                    });
-                }
+            // Fetch bucket list for this group
+            const { data: bucketList } = await supabase
+                .from('bucket_list')
+                .select('*')
+                .eq('group_id', group.id);
+
+            // Fetch events for this group
+            const { data: events } = await supabase
+                .from('events')
+                .select('*')
+                .eq('group_id', group.id);
+
+            if (trips) {
+                const completed = trips.filter((t: any) => isTripCompleted(t.end_date));
+                const planned = trips.filter((t: any) => isTripPlanned(t.end_date));
+                const countries = [...new Set(trips.map((t: any) => t.country).filter(Boolean))];
+
+                let totalDays = 0;
+                let longestTrip = 0;
+                completed.forEach((trip: any) => {
+                    const days = differenceInDays(new Date(trip.end_date), new Date(trip.start_date)) + 1;
+                    totalDays += days;
+                    if (days > longestTrip) longestTrip = days;
+                });
+
+                const countryCount: Record<string, number> = {};
+                trips.forEach((t: any) => {
+                    if (t.country) {
+                        countryCount[t.country] = (countryCount[t.country] || 0) + 1;
+                    }
+                });
+                const favoriteCountry = Object.entries(countryCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None yet';
+
+                setStats({
+                    tripsCompleted: completed.length,
+                    tripsPlanned: planned.length,
+                    countriesVisited: countries,
+                    photosCount: memories?.length || 0,
+                    daysAdventuring: totalDays,
+                    bucketListTotal: bucketList?.length || 0,
+                    bucketListCompleted: bucketList?.filter((b: any) => b.status === 'completed').length || 0,
+                    eventsCount: events?.length || 0,
+                    longestTrip,
+                    favoriteCountry,
+                });
+
+                // Check for newly unlocked achievements
+                await checkAchievements({
+                    trips: completed.length,
+                    countries: countries.length,
+                    photos: memories?.length || 0,
+                    bucketCompleted: bucketList?.filter((b: any) => b.status === 'completed').length || 0,
+                    daysTogether: group.anniversary_date ? differenceInDays(new Date(), new Date(group.anniversary_date)) : 0,
+                });
             }
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -104,7 +239,7 @@ export default function StatsScreen() {
 
     if (loading) {
         return (
-            <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1 items-center justify-center">
+            <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <ActivityIndicator size="large" color="#e07a5f" />
             </LinearGradient>
         );
@@ -144,23 +279,23 @@ export default function StatsScreen() {
     const unlockedCount = achievements.filter(a => a.unlocked).length;
 
     return (
-        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1">
+        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1 }}>
             {/* Header */}
-            <View className="px-4 pt-4 pb-3 flex-row items-center gap-3">
-                <TouchableOpacity onPress={() => router.back()} className="w-8 h-8 items-center justify-center">
+            <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity onPress={() => router.push('/profile')} style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
                     <ArrowLeft size={20} color="#3d405b" />
                 </TouchableOpacity>
                 <View>
-                    <Text className="text-2xl font-bold text-gray-800">Journey Stats</Text>
-                    <Text className="text-xs text-gray-600">
+                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1f2937' }}>Journey Stats</Text>
+                    <Text style={{ fontSize: 12, color: '#4b5563' }}>
                         {yearsTogether > 0 ? `${yearsTogether}+ years` : `${daysTogether} days`} of adventures
                     </Text>
                 </View>
             </View>
 
-            <ScrollView className="flex-1 px-4 pb-4">
+            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }} contentContainerStyle={{ paddingBottom: 16, paddingTop: 10 }}>
                 {/* Main Stats Grid */}
-                <View className="flex-row flex-wrap gap-3 mb-5">
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
                     <StatCard
                         icon={Globe}
                         value={stats.countriesVisited.length}
@@ -193,58 +328,58 @@ export default function StatsScreen() {
                 </View>
 
                 {/* Travel Percentage */}
-                <View className="bg-white rounded-2xl shadow-md p-4 mb-5">
-                    <View className="flex-row items-center justify-between mb-3">
-                        <View className="flex-row items-center gap-2">
+                <View style={{ backgroundColor: 'white', borderRadius: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, padding: 16, marginBottom: 20 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <TrendingUp size={16} color="#e07a5f" />
-                            <Text className="text-sm font-medium text-gray-800">Time Traveling Together</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '500', color: '#1f2937' }}>Time Traveling Together</Text>
                         </View>
-                        <Text className="text-2xl font-bold text-terracotta">{travelPercentage}%</Text>
+                        <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#e07a5f' }}>{travelPercentage}%</Text>
                     </View>
-                    <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <View
-                            className="h-full bg-gradient-to-r from-terracotta to-amber-500"
-                            style={{ width: `${travelPercentage}%` }}
+                    <View style={{ height: 8, backgroundColor: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
+                        <LinearGradient
+                            colors={['#e07a5f', '#f59e0b']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={{ height: '100%', width: `${travelPercentage}%` }}
                         />
                     </View>
-                    <Text className="text-xs text-gray-600 text-center mt-2">
+                    <Text style={{ fontSize: 12, color: '#4b5563', textAlign: 'center', marginTop: 8 }}>
                         {stats.daysAdventuring} days out of {daysTogether} together
                     </Text>
                 </View>
 
                 {/* Achievements */}
-                <View className="mb-5">
-                    <View className="flex-row items-center justify-between mb-3">
-                        <View className="flex-row items-center gap-2">
+                <View style={{ marginBottom: 20 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <Trophy size={16} color="#e07a5f" />
-                            <Text className="text-lg font-bold text-gray-800">Achievements</Text>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1f2937' }}>Achievements</Text>
                         </View>
-                        <Text className="text-xs text-gray-600">
+                        <Text style={{ fontSize: 12, color: '#4b5563' }}>
                             {unlockedCount}/{achievements.length} unlocked
                         </Text>
                     </View>
-                    <View className="flex-row flex-wrap gap-2">
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                         {achievements.map((achievement) => (
                             <View
                                 key={achievement.id}
-                                className={`w-[23%] p-2 rounded-xl items-center ${achievement.unlocked ? 'bg-terracotta/10' : 'bg-gray-100 opacity-50'
-                                    }`}
+                                style={{ width: '23%', padding: 8, borderRadius: 12, alignItems: 'center', backgroundColor: achievement.unlocked ? 'rgba(224, 122, 95, 0.1)' : '#f3f4f6', opacity: achievement.unlocked ? 1 : 0.5 }}
                             >
-                                <Text className={`text-3xl ${achievement.unlocked ? '' : 'opacity-30'}`}>
+                                <Text style={{ fontSize: 30, opacity: achievement.unlocked ? 1 : 0.3 }}>
                                     {achievement.icon}
                                 </Text>
-                                <Text className="text-[9px] text-center text-gray-800 mt-1 font-medium" numberOfLines={1}>
+                                <Text style={{ fontSize: 9, textAlign: 'center', color: '#1f2937', marginTop: 4, fontWeight: '500' }} numberOfLines={1}>
                                     {achievement.name}
                                 </Text>
                                 {!achievement.unlocked && (
-                                    <View className="w-full mt-1">
-                                        <View className="h-1 bg-gray-200 rounded-full overflow-hidden">
+                                    <View style={{ width: '100%', marginTop: 4 }}>
+                                        <View style={{ height: 4, backgroundColor: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
                                             <View
-                                                className="h-full bg-terracotta"
-                                                style={{ width: `${(achievement.progress / achievement.target) * 100}%` }}
+                                                style={{ height: '100%', backgroundColor: '#e07a5f', width: `${(achievement.progress / achievement.target) * 100}%` }}
                                             />
                                         </View>
-                                        <Text className="text-[8px] text-gray-500 text-center mt-0.5">
+                                        <Text style={{ fontSize: 8, color: '#6b7280', textAlign: 'center', marginTop: 2 }}>
                                             {achievement.progress}/{achievement.target}
                                         </Text>
                                     </View>
@@ -256,40 +391,40 @@ export default function StatsScreen() {
 
                 {/* Fun Facts */}
                 <LinearGradient
-                    colors={['#e07a5f10', '#81b29a10']}
+                    colors={['rgba(224, 122, 95, 0.1)', 'rgba(129, 178, 154, 0.1)']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
-                    className="rounded-2xl p-4 shadow"
+                    style={{ borderRadius: 16, padding: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4 }}
                 >
-                    <View className="flex-row items-center gap-2 mb-3">
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                         <Heart size={16} color="#e07a5f" fill="#e07a5f" />
-                        <Text className="text-base font-bold text-gray-800">Fun Facts</Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1f2937' }}>Fun Facts</Text>
                     </View>
-                    <View className="gap-2">
-                        <View className="flex-row justify-between">
-                            <Text className="text-sm text-gray-600">Longest trip:</Text>
-                            <Text className="text-sm font-semibold text-gray-800">
+                    <View style={{ gap: 8 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 14, color: '#4b5563' }}>Longest trip:</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>
                                 {stats.longestTrip > 0 ? `${stats.longestTrip} days` : 'No trips yet'}
                             </Text>
                         </View>
-                        <View className="flex-row justify-between">
-                            <Text className="text-sm text-gray-600">Favorite country:</Text>
-                            <Text className="text-sm font-semibold text-gray-800">{stats.favoriteCountry}</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 14, color: '#4b5563' }}>Favorite country:</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>{stats.favoriteCountry}</Text>
                         </View>
-                        <View className="flex-row justify-between">
-                            <Text className="text-sm text-gray-600">Bucket list progress:</Text>
-                            <Text className="text-sm font-semibold text-gray-800">
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 14, color: '#4b5563' }}>Bucket list progress:</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>
                                 {stats.bucketListCompleted}/{stats.bucketListTotal} completed
                             </Text>
                         </View>
-                        <View className="flex-row justify-between">
-                            <Text className="text-sm text-gray-600">Events planned:</Text>
-                            <Text className="text-sm font-semibold text-gray-800">{stats.eventsCount}</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 14, color: '#4b5563' }}>Events planned:</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>{stats.eventsCount}</Text>
                         </View>
                         {stats.countriesVisited.length > 0 && (
-                            <View className="pt-2 border-t border-gray-300">
-                                <Text className="text-xs text-gray-600 mb-1">Countries visited:</Text>
-                                <Text className="text-xs font-medium text-gray-800">
+                            <View style={{ paddingTop: 8, borderTopWidth: 1, borderTopColor: '#d1d5db' }}>
+                                <Text style={{ fontSize: 12, color: '#4b5563', marginBottom: 4 }}>Countries visited:</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '500', color: '#1f2937' }}>
                                     {stats.countriesVisited.join(', ')}
                                 </Text>
                             </View>
@@ -297,6 +432,13 @@ export default function StatsScreen() {
                     </View>
                 </LinearGradient>
             </ScrollView>
+
+            {/* Achievement Notification Modal */}
+            <AchievementNotification
+                achievement={currentAchievement}
+                visible={showNotification}
+                onDismiss={handleDismissAchievement}
+            />
         </LinearGradient>
     );
 }
@@ -312,13 +454,13 @@ interface StatCardProps {
 
 function StatCard({ icon: Icon, value, label, sublabel, color, bgColor }: StatCardProps) {
     return (
-        <View className="w-[48%] bg-white rounded-2xl shadow-md p-4 items-center">
-            <View className="w-12 h-12 rounded-full items-center justify-center mb-2" style={{ backgroundColor: bgColor }}>
+        <View style={{ width: '48%', backgroundColor: 'white', borderRadius: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, padding: 16, alignItems: 'center' }}>
+            <View style={{ width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 8, backgroundColor: bgColor }}>
                 <Icon size={24} color={color} />
             </View>
-            <Text className="text-3xl font-bold text-gray-800">{value}</Text>
-            <Text className="text-xs text-gray-600">{label}</Text>
-            {sublabel && <Text className="text-[10px] text-terracotta mt-0.5">{sublabel}</Text>}
+            <Text style={{ fontSize: 30, fontWeight: 'bold', color: '#1f2937' }}>{value}</Text>
+            <Text style={{ fontSize: 12, color: '#4b5563' }}>{label}</Text>
+            {sublabel && <Text style={{ fontSize: 10, color: '#e07a5f', marginTop: 2 }}>{sublabel}</Text>}
         </View>
     );
 }

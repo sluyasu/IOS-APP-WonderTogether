@@ -1,11 +1,18 @@
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, TextInput, Image as RNImage, Alert, FlatList } from 'react-native';
-import { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, Dimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Plus, Heart, MapPin, Calendar, X, ChevronLeft, ChevronRight, FolderPlus, ImageIcon, Plane, CalendarDays, Camera, Upload } from 'lucide-react-native';
-import { format } from 'date-fns';
+import { Plus, Heart, MapPin, X, ChevronLeft, ChevronRight, Camera, Download } from 'lucide-react-native';
+import { uploadToSupabase } from '../../lib/storage';
+import { format, parseISO, isWithinInterval } from 'date-fns';
+import { useGroup } from '../../contexts/GroupContext';
+import ImageViewing from "react-native-image-viewing";
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
+import { Image } from 'expo-image';
 
 interface Memory {
     id: string;
@@ -16,24 +23,64 @@ interface Memory {
     is_favorite: boolean;
     trip_id: string | null;
     event_id: string | null;
-    trip?: { destination: string };
+}
+
+interface Trip {
+    id: string;
+    destination: string;
+    country: string;
+    start_date: string;
+    end_date: string;
+}
+
+interface Album {
+    id: string;
+    title: string;
+    type: 'trip' | 'favorites' | 'unlinked' | 'all';
+    coverImage: string | null;
+    photoCount: number;
+    trip?: Trip;
 }
 
 export default function MemoriesScreen() {
     const router = useRouter();
+    const { currentGroup } = useGroup();
     const [loading, setLoading] = useState(true);
-    const [couple, setCouple] = useState<any>(null);
     const [memories, setMemories] = useState<Memory[]>([]);
-    const [selectedPhoto, setSelectedPhoto] = useState<Memory | null>(null);
+    const [trips, setTrips] = useState<Trip[]>([]);
+    const [albums, setAlbums] = useState<Album[]>([]);
+
+    // View state
+    const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
+
+    // Viewer state
+    const [viewerVisible, setViewerVisible] = useState(false);
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+    // Upload state
     const [showAddPhoto, setShowAddPhoto] = useState(false);
     const [uploading, setUploading] = useState(false);
-    const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [selectedImages, setSelectedImages] = useState<string[]>([]);
     const [caption, setCaption] = useState('');
     const [location, setLocation] = useState('');
+    const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
 
     useEffect(() => {
         fetchData();
     }, []);
+
+    // Refetch data when screen comes into focus
+    useFocusEffect(
+        React.useCallback(() => {
+            fetchData();
+        }, [])
+    );
+
+    useEffect(() => {
+        if (memories.length > 0 && trips.length >= 0) {
+            buildAlbums();
+        }
+    }, [memories, trips]);
 
     const fetchData = async () => {
         setLoading(true);
@@ -44,29 +91,98 @@ export default function MemoriesScreen() {
                 return;
             }
 
-            const { data: coupleData } = await supabase
-                .from('couples')
-                .select('*')
-                .or(`partner1_id.eq.${user.id},partner2_id.eq.${user.id}`)
-                .single();
-            setCouple(coupleData);
-
-            if (coupleData) {
+            if (currentGroup) {
+                // Fetch memories
                 const { data: memoriesData } = await supabase
                     .from('memories')
-                    .select(`
-                        *,
-                        trip:trips(destination)
-                    `)
-                    .eq('couple_id', coupleData.id)
+                    .select('*')
+                    .eq('group_id', currentGroup.id)
                     .order('taken_at', { ascending: false });
-
                 setMemories(memoriesData || []);
+
+                // Fetch trips
+                const { data: tripsData } = await supabase
+                    .from('trips')
+                    .select('*')
+                    .eq('group_id', currentGroup.id)
+                    .order('start_date', { ascending: false });
+                setTrips(tripsData || []);
             }
         } catch (error) {
             console.error('Error fetching data:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const buildAlbums = () => {
+        const albumsList: Album[] = [];
+
+        // All Memories
+        if (memories.length > 0) {
+            albumsList.push({
+                id: 'all',
+                title: 'All Memories',
+                type: 'all',
+                coverImage: memories[0]?.image_url || null,
+                photoCount: memories.length,
+            });
+        }
+
+        // Favorites
+        const favoriteMemories = memories.filter(m => m.is_favorite);
+        if (favoriteMemories.length > 0) {
+            albumsList.push({
+                id: 'favorites',
+                title: 'Favorites',
+                type: 'favorites',
+                coverImage: favoriteMemories[0]?.image_url || null,
+                photoCount: favoriteMemories.length,
+            });
+        }
+
+        // Trip albums
+        trips.forEach(trip => {
+            const tripMemories = memories.filter(m => m.trip_id === trip.id);
+            if (tripMemories.length > 0) {
+                albumsList.push({
+                    id: trip.id,
+                    title: trip.destination,
+                    type: 'trip',
+                    coverImage: tripMemories[0]?.image_url || null,
+                    photoCount: tripMemories.length,
+                    trip,
+                });
+            }
+        });
+
+        // Unlinked
+        const unlinkedMemories = memories.filter(m => !m.trip_id);
+        if (unlinkedMemories.length > 0) {
+            albumsList.push({
+                id: 'unlinked',
+                title: 'Unlinked',
+                type: 'unlinked',
+                coverImage: unlinkedMemories[0]?.image_url || null,
+                photoCount: unlinkedMemories.length,
+            });
+        }
+
+        setAlbums(albumsList);
+    };
+
+    const getAlbumPhotos = (album: Album): Memory[] => {
+        switch (album.type) {
+            case 'all':
+                return memories;
+            case 'favorites':
+                return memories.filter(m => m.is_favorite);
+            case 'unlinked':
+                return memories.filter(m => !m.trip_id);
+            case 'trip':
+                return memories.filter(m => m.trip_id === album.id);
+            default:
+                return [];
         }
     };
 
@@ -78,68 +194,66 @@ export default function MemoriesScreen() {
         }
 
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
+            mediaTypes: ['images'],
+            allowsMultipleSelection: true,
             quality: 0.8,
         });
 
-        if (!result.canceled) {
-            setSelectedImage(result.assets[0].uri);
+        if (!result.canceled && result.assets.length > 0) {
+            setSelectedImages(result.assets.map(asset => asset.uri));
+            suggestTrip();
             setShowAddPhoto(true);
         }
     };
 
-    const takePhoto = async () => {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission needed', 'Please grant camera permissions');
-            return;
-        }
-
-        const result = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
+    const suggestTrip = () => {
+        const now = new Date();
+        const currentTrip = trips.find(t => {
+            const start = parseISO(t.start_date);
+            const end = parseISO(t.end_date);
+            return isWithinInterval(now, { start, end });
         });
 
-        if (!result.canceled) {
-            setSelectedImage(result.assets[0].uri);
-            setShowAddPhoto(true);
+        if (currentTrip) {
+            setSelectedTripId(currentTrip.id);
+        } else if (trips.length > 0) {
+            setSelectedTripId(trips[0].id);
         }
     };
 
-    const uploadPhoto = async () => {
-        if (!selectedImage || !couple) return;
+    const handleUploadPhoto = async () => {
+        if (selectedImages.length === 0 || !currentGroup) return;
 
         setUploading(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const uploadPromises = selectedImages.map(async (imageUri, index) => {
+                const timestamp = Date.now() + index;
+                const path = `${currentGroup.id}/${timestamp}.jpg`;
+                const publicUrl = await uploadToSupabase(imageUri, 'memories', path);
 
-            // In a real app, you'd upload to Supabase Storage here
-            // For now, we'll just insert with the local URI (this won't work in production)
-            const { error } = await supabase.from('memories').insert({
-                couple_id: couple.id,
-                uploaded_by: user.id,
-                image_url: selectedImage, // In production, this should be the Supabase Storage URL
-                caption: caption || 'Untitled',
-                location: location || null,
-                taken_at: new Date().toISOString().split('T')[0],
-                is_favorite: false,
+                return supabase.from('memories').insert({
+                    group_id: currentGroup?.id,
+                    image_url: publicUrl,
+                    caption,
+                    location,
+                    trip_id: selectedTripId,
+                    taken_at: new Date().toISOString(),
+                });
             });
 
-            if (!error) {
-                setShowAddPhoto(false);
-                setSelectedImage(null);
-                setCaption('');
-                setLocation('');
-                fetchData();
-                Alert.alert('Success', 'Photo uploaded!');
-            }
+            await Promise.all(uploadPromises);
+
+            const photoText = selectedImages.length === 1 ? 'Photo' : `${selectedImages.length} photos`;
+            Alert.alert('Success', `${photoText} added successfully! ✨`);
+            setShowAddPhoto(false);
+            setSelectedImages([]);
+            setCaption('');
+            setLocation('');
+            setSelectedTripId(null);
+            fetchData();
         } catch (error) {
-            console.error('Error uploading photo:', error);
-            Alert.alert('Error', 'Failed to upload photo');
+            console.error('Error uploading photos:', error);
+            Alert.alert('Error', 'Failed to upload photos');
         } finally {
             setUploading(false);
         }
@@ -155,253 +269,324 @@ export default function MemoriesScreen() {
             setMemories(prev => prev.map(m =>
                 m.id === memory.id ? { ...m, is_favorite: !m.is_favorite } : m
             ));
-            if (selectedPhoto?.id === memory.id) {
-                setSelectedPhoto({ ...selectedPhoto, is_favorite: !memory.is_favorite });
-            }
         } catch (error) {
             console.error('Error toggling favorite:', error);
         }
     };
 
-    const currentIndex = selectedPhoto ? memories.findIndex(p => p.id === selectedPhoto.id) : -1;
+    const downloadImage = async (url: string) => {
+        try {
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission needed', 'Please allow access to save photos');
+                return;
+            }
 
-    const handlePrev = () => {
-        if (currentIndex > 0) {
-            setSelectedPhoto(memories[currentIndex - 1]);
-        }
-    };
+            const fileUri = FileSystem.documentDirectory + 'temp_download.jpg';
+            const { uri } = await FileSystem.downloadAsync(url, fileUri);
 
-    const handleNext = () => {
-        if (currentIndex < memories.length - 1) {
-            setSelectedPhoto(memories[currentIndex + 1]);
+            await MediaLibrary.saveToLibraryAsync(uri);
+            Alert.alert('Saved!', 'Photo saved to your gallery 📸');
+        } catch (error) {
+            console.error('Error downloading image:', error);
+            Alert.alert('Error', 'Failed to save photo');
         }
     };
 
     if (loading) {
         return (
-            <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1 items-center justify-center">
+            <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <ActivityIndicator size="large" color="#e07a5f" />
             </LinearGradient>
         );
     }
 
-    return (
-        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1">
-            <View className="flex-1 px-4 py-4">
-                {/* Header */}
-                <View className="flex-row items-center justify-between mb-4">
-                    <View>
-                        <Text className="text-xl font-bold text-gray-800">Our Memories</Text>
-                        <Text className="text-xs text-gray-600">{memories.length} photos</Text>
+    const AlbumCard = ({ album }: { album: Album }) => (
+        <TouchableOpacity
+            onPress={() => setSelectedAlbum(album)}
+            style={{ width: '48%', marginBottom: 16 }}
+        >
+            <View style={{ backgroundColor: 'white', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 }}>
+                <View style={{ width: '100%', aspectRatio: 1, backgroundColor: '#f3f4f6' }}>
+                    {album.coverImage ? (
+                        <Image
+                            source={{ uri: album.coverImage }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                            transition={200}
+                            cachePolicy="memory-disk"
+                        />
+                    ) : (
+                        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                            <Camera size={32} color="#d1d5db" />
+                        </View>
+                    )}
+                    <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                        <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>{album.photoCount}</Text>
                     </View>
-                    <TouchableOpacity
-                        onPress={pickImage}
-                        className="bg-terracotta px-3 py-2 rounded-lg flex-row items-center gap-1"
-                    >
-                        <Plus size={14} color="white" />
-                        <Text className="text-xs text-white">Photo</Text>
-                    </TouchableOpacity>
                 </View>
+                <View style={{ padding: 12 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }} numberOfLines={1}>{album.title}</Text>
+                    {album.trip && (
+                        <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                            {format(parseISO(album.trip.start_date), 'MMM d')} - {format(parseISO(album.trip.end_date), 'MMM d, yyyy')}
+                        </Text>
+                    )}
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
 
-                {/* Photo Grid */}
-                {memories.length === 0 ? (
-                    <View className="flex-1 items-center justify-center">
-                        <ImageIcon size={48} color="#d1d5db" />
-                        <Text className="text-sm text-gray-600 mt-2">No photos yet</Text>
-                        <Text className="text-xs text-gray-500">Add your first memory!</Text>
+    // Albums Grid View
+    if (!selectedAlbum) {
+        return (
+            <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1 }}>
+                <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingVertical: 16 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                        <View>
+                            <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1f2937' }}>Memories</Text>
+                            <Text style={{ fontSize: 12, color: '#4b5563', marginTop: 2 }}>
+                                {memories.length} photos • {albums.length} albums
+                            </Text>
+                        </View>
                         <TouchableOpacity
                             onPress={pickImage}
-                            className="mt-4 bg-terracotta px-6 py-3 rounded-xl flex-row items-center gap-2"
+                            style={{ backgroundColor: '#e07a5f', width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' }}
                         >
-                            <Camera size={20} color="white" />
-                            <Text className="text-white font-semibold">Add Photo</Text>
+                            <Plus size={24} color="white" />
                         </TouchableOpacity>
                     </View>
-                ) : (
-                    <FlatList
-                        data={memories}
-                        numColumns={3}
-                        keyExtractor={(item) => item.id}
-                        columnWrapperStyle={{ gap: 2 }}
-                        contentContainerStyle={{ gap: 2 }}
-                        renderItem={({ item }) => (
+
+                    {albums.length === 0 ? (
+                        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 80 }}>
+                            <Camera size={64} color="#d1d5db" />
+                            <Text style={{ fontSize: 18, fontWeight: '600', color: '#1f2937', marginTop: 16 }}>No memories yet</Text>
+                            <Text style={{ fontSize: 14, color: '#6b7280', marginTop: 8, textAlign: 'center' }}>
+                                Start capturing your travel moments!
+                            </Text>
                             <TouchableOpacity
-                                onPress={() => setSelectedPhoto(item)}
-                                className="flex-1 aspect-square relative"
-                                style={{ maxWidth: '33.33%' }}
+                                onPress={pickImage}
+                                style={{ marginTop: 24, backgroundColor: '#e07a5f', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                             >
-                                <RNImage
-                                    source={{ uri: item.image_url }}
-                                    className="w-full h-full"
-                                    resizeMode="cover"
+                                <Camera size={20} color="white" />
+                                <Text style={{ color: 'white', fontWeight: '600' }}>Add Your First Photo</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                            {albums.map(album => (
+                                <AlbumCard key={album.id} album={album} />
+                            ))}
+                        </View>
+                    )}
+                </ScrollView>
+                {renderAddPhotoModal()}
+            </LinearGradient>
+        );
+    }
+
+    // Album Detail View
+    const albumPhotos = getAlbumPhotos(selectedAlbum);
+    const galleryImages = albumPhotos.map(p => ({ uri: p.image_url }));
+
+    const renderFooter = ({ imageIndex }: { imageIndex: number }) => {
+        const photo = albumPhotos[imageIndex];
+        if (!photo) return null;
+
+        return (
+            <View style={{ backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 20, paddingVertical: 20, paddingBottom: 40 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View style={{ flex: 1, marginRight: 16 }}>
+                        {photo.caption ? (
+                            <Text style={{ color: 'white', fontSize: 16, fontWeight: '600', marginBottom: 4 }}>{photo.caption}</Text>
+                        ) : null}
+                        {photo.location ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <MapPin size={14} color="#d1d5db" />
+                                <Text style={{ color: '#d1d5db', fontSize: 14 }}>{photo.location}</Text>
+                            </View>
+                        ) : null}
+                        {photo.taken_at && (
+                            <Text style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>
+                                {format(parseISO(photo.taken_at), 'MMM d, yyyy • h:mm a')}
+                            </Text>
+                        )}
+                    </View>
+
+                    <TouchableOpacity
+                        onPress={() => toggleFavorite(photo)}
+                        style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20 }}
+                    >
+                        <Heart size={24} color={photo.is_favorite ? "#e07a5f" : "white"} fill={photo.is_favorite ? "#e07a5f" : "transparent"} />
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    };
+
+    return (
+        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1 }}>
+            <ScrollView style={{ flex: 1, paddingVertical: 16 }}>
+                <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+                    <TouchableOpacity
+                        onPress={() => setSelectedAlbum(null)}
+                        style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
+                    >
+                        <ChevronLeft size={20} color="#6b7280" />
+                        <Text style={{ fontSize: 14, color: '#6b7280', marginLeft: 4 }}>Albums</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1f2937' }}>{selectedAlbum.title}</Text>
+                    {selectedAlbum.trip && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <MapPin size={12} color="#6b7280" />
+                                <Text style={{ fontSize: 12, color: '#6b7280' }}>{selectedAlbum.trip.country}</Text>
+                            </View>
+                            <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                                {format(parseISO(selectedAlbum.trip.start_date), 'MMM d')} - {format(parseISO(selectedAlbum.trip.end_date), 'MMM d, yyyy')}
+                            </Text>
+                        </View>
+                    )}
+                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{albumPhotos.length} photos</Text>
+                </View>
+
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14 }}>
+                    {albumPhotos.map((memory, index) => (
+                        <TouchableOpacity
+                            key={memory.id}
+                            onPress={() => {
+                                setCurrentImageIndex(index);
+                                setViewerVisible(true);
+                            }}
+                            style={{ width: '33.33%', padding: 2 }}
+                        >
+                            <View style={{ aspectRatio: 1, backgroundColor: '#f3f4f6', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+                                <Image
+                                    source={{ uri: memory.image_url }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    contentFit="cover"
+                                    transition={200}
+                                    cachePolicy="memory-disk"
                                 />
-                                {item.is_favorite && (
-                                    <View className="absolute top-1 right-1">
+                                {memory.is_favorite && (
+                                    <View style={{ position: 'absolute', top: 4, right: 4 }}>
                                         <Heart size={14} color="white" fill="#e07a5f" />
                                     </View>
                                 )}
-                                {item.trip_id && (
-                                    <View className="absolute bottom-1 left-1">
-                                        <Plane size={12} color="white" />
-                                    </View>
-                                )}
-                            </TouchableOpacity>
-                        )}
+                            </View>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            </ScrollView>
+
+            <ImageViewing
+                images={galleryImages}
+                imageIndex={currentImageIndex}
+                visible={viewerVisible}
+                onRequestClose={() => setViewerVisible(false)}
+                FooterComponent={renderFooter}
+                swipeToCloseEnabled={true}
+                doubleTapToZoomEnabled={true}
+                ImageComponent={(props: any) => (
+                    <Image
+                        {...props}
+                        style={{ width: '100%', height: '100%' }}
+                        contentFit="contain"
+                        transition={200}
+                        cachePolicy="memory-disk"
                     />
                 )}
-            </View>
+            />
 
-            {/* Photo Detail Modal */}
-            {selectedPhoto && (
-                <Modal visible={true} animationType="fade" transparent={true}>
-                    <View className="flex-1 bg-black/95">
-                        {/* Header */}
-                        <View className="absolute top-12 left-0 right-0 z-10 flex-row items-center justify-between px-4">
-                            <Text className="text-white/70 text-xs">
-                                {currentIndex + 1} / {memories.length}
-                            </Text>
-                            <TouchableOpacity
-                                onPress={() => setSelectedPhoto(null)}
-                                className="w-8 h-8 bg-white/10 rounded-full items-center justify-center"
-                            >
-                                <X size={16} color="white" />
+            {renderAddPhotoModal()}
+        </LinearGradient>
+    );
+
+    function renderAddPhotoModal() {
+        return (
+            <Modal visible={showAddPhoto} animationType="slide" transparent>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                            <Text style={{ fontSize: 18, fontWeight: '600' }}>Add Memory</Text>
+                            <TouchableOpacity onPress={() => setShowAddPhoto(false)}>
+                                <X size={24} color="#6b7280" />
                             </TouchableOpacity>
                         </View>
 
-                        {/* Image */}
-                        <View className="flex-1 items-center justify-center">
-                            <RNImage
-                                source={{ uri: selectedPhoto.image_url }}
-                                className="w-full h-full"
-                                resizeMode="contain"
+                        <ScrollView style={{ maxHeight: 500 }}>
+                            {selectedImages.length > 0 && (
+                                <View style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937', marginBottom: 8 }}>Selected Photos ({selectedImages.length})</Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', gap: 8 }}>
+                                        {selectedImages.map((uri, index) => (
+                                            <View key={index} style={{ marginRight: 8, position: 'relative' }}>
+                                                <Image
+                                                    source={{ uri }}
+                                                    style={{ width: 100, height: 100, borderRadius: 8 }}
+                                                    contentFit="cover"
+                                                />
+                                                <TouchableOpacity
+                                                    onPress={() => setSelectedImages(prev => prev.filter((_, i) => i !== index))}
+                                                    style={{ position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+                                                >
+                                                    <X size={16} color="white" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        ))}
+                                    </ScrollView>
+                                </View>
+                            )}
+
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937', marginBottom: 8 }}>Link to Trip (Optional)</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                                <TouchableOpacity
+                                    onPress={() => setSelectedTripId(null)}
+                                    style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, backgroundColor: !selectedTripId ? '#e07a5f' : '#f3f4f6' }}
+                                >
+                                    <Text style={{ color: !selectedTripId ? 'white' : '#6b7280', fontSize: 12 }}>No Trip</Text>
+                                </TouchableOpacity>
+                                {trips.map(trip => (
+                                    <TouchableOpacity
+                                        key={trip.id}
+                                        onPress={() => setSelectedTripId(trip.id)}
+                                        style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, backgroundColor: selectedTripId === trip.id ? '#e07a5f' : '#f3f4f6' }}
+                                    >
+                                        <Text style={{ color: selectedTripId === trip.id ? 'white' : '#6b7280', fontSize: 12 }}>{trip.destination}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+
+                            <TextInput
+                                value={caption}
+                                onChangeText={setCaption}
+                                placeholder="Add a caption..."
+                                style={{ backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 12, fontSize: 14 }}
+                                multiline
                             />
 
-                            {/* Navigation */}
-                            {currentIndex > 0 && (
-                                <TouchableOpacity
-                                    onPress={handlePrev}
-                                    className="absolute left-2 w-8 h-8 bg-black/50 rounded-full items-center justify-center"
-                                >
-                                    <ChevronLeft size={20} color="white" />
-                                </TouchableOpacity>
-                            )}
-                            {currentIndex < memories.length - 1 && (
-                                <TouchableOpacity
-                                    onPress={handleNext}
-                                    className="absolute right-2 w-8 h-8 bg-black/50 rounded-full items-center justify-center"
-                                >
-                                    <ChevronRight size={20} color="white" />
-                                </TouchableOpacity>
-                            )}
-                        </View>
+                            <TextInput
+                                value={location}
+                                onChangeText={setLocation}
+                                placeholder="Add location..."
+                                style={{ backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 20, fontSize: 14 }}
+                            />
 
-                        {/* Details */}
-                        <View className="bg-white rounded-t-3xl p-4">
-                            <Text className="text-base font-bold text-gray-800 mb-2">
-                                {selectedPhoto.caption || 'Untitled'}
-                            </Text>
-                            <View className="flex-row items-center gap-3 mb-3">
-                                {selectedPhoto.location && (
-                                    <View className="flex-row items-center gap-1">
-                                        <MapPin size={12} color="#9ca3af" />
-                                        <Text className="text-xs text-gray-600">{selectedPhoto.location}</Text>
-                                    </View>
-                                )}
-                                {selectedPhoto.taken_at && (
-                                    <View className="flex-row items-center gap-1">
-                                        <Calendar size={12} color="#9ca3af" />
-                                        <Text className="text-xs text-gray-600">
-                                            {format(new Date(selectedPhoto.taken_at), 'MMM d, yyyy')}
-                                        </Text>
-                                    </View>
-                                )}
-                            </View>
-                            {selectedPhoto.trip && (
-                                <View className="bg-blue-100 px-2 py-1 rounded-full self-start flex-row items-center gap-1 mb-3">
-                                    <Plane size={12} color="#3b82f6" />
-                                    <Text className="text-xs text-blue-700">{selectedPhoto.trip.destination}</Text>
-                                </View>
-                            )}
                             <TouchableOpacity
-                                onPress={() => toggleFavorite(selectedPhoto)}
-                                className="bg-gray-100 rounded-xl px-4 py-3 flex-row items-center justify-center gap-2"
+                                onPress={handleUploadPhoto}
+                                disabled={uploading}
+                                style={{ backgroundColor: '#e07a5f', borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}
                             >
-                                <Heart
-                                    size={16}
-                                    color={selectedPhoto.is_favorite ? '#e07a5f' : '#9ca3af'}
-                                    fill={selectedPhoto.is_favorite ? '#e07a5f' : 'transparent'}
-                                />
-                                <Text className={`text-sm font-semibold ${selectedPhoto.is_favorite ? 'text-terracotta' : 'text-gray-600'
-                                    }`}>
-                                    {selectedPhoto.is_favorite ? 'Favorited' : 'Favorite'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Modal>
-            )}
-
-            {/* Add Photo Modal */}
-            <Modal visible={showAddPhoto} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-white rounded-t-3xl p-6" style={{ maxHeight: '80%' }}>
-                        <View className="flex-row items-center justify-between mb-4">
-                            <Text className="text-xl font-bold text-gray-800">Add Photo</Text>
-                            <TouchableOpacity onPress={() => { setShowAddPhoto(false); setSelectedImage(null); }}>
-                                <X size={24} color="#9ca3af" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <ScrollView showsVerticalScrollIndicator={false}>
-                            {/* Image Preview */}
-                            {selectedImage && (
-                                <View className="mb-4">
-                                    <RNImage
-                                        source={{ uri: selectedImage }}
-                                        className="w-full aspect-square rounded-xl"
-                                        resizeMode="cover"
-                                    />
-                                </View>
-                            )}
-
-                            {/* Caption */}
-                            <View className="mb-4">
-                                <Text className="text-xs text-gray-600 mb-1">Caption</Text>
-                                <TextInput
-                                    value={caption}
-                                    onChangeText={setCaption}
-                                    placeholder="What's this memory about?"
-                                    className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
-                                    multiline
-                                />
-                            </View>
-
-                            {/* Location */}
-                            <View className="mb-4">
-                                <Text className="text-xs text-gray-600 mb-1">Location</Text>
-                                <TextInput
-                                    value={location}
-                                    onChangeText={setLocation}
-                                    placeholder="Where was this?"
-                                    className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
-                                />
-                            </View>
-
-                            {/* Upload Button */}
-                            <TouchableOpacity
-                                onPress={uploadPhoto}
-                                disabled={uploading || !selectedImage}
-                                className="bg-terracotta rounded-xl px-4 py-3 items-center flex-row justify-center gap-2"
-                            >
-                                <Upload size={16} color="white" />
-                                <Text className="text-white font-semibold">
-                                    {uploading ? 'Uploading...' : 'Upload Photo'}
-                                </Text>
+                                {uploading ? (
+                                    <ActivityIndicator color="white" />
+                                ) : (
+                                    <Text style={{ color: 'white', fontWeight: '600' }}>Add Photo</Text>
+                                )}
                             </TouchableOpacity>
                         </ScrollView>
                     </View>
                 </View>
             </Modal>
-        </LinearGradient>
-    );
+        );
+    }
 }

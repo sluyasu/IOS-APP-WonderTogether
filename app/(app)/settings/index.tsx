@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import * as WebBrowser from 'expo-web-browser';
 import {
     ArrowLeft, Bell, Globe, Heart, Lock, Palette, Trash2, User,
     Calendar, Copy, Check, ChevronRight, AlertTriangle
@@ -122,34 +123,34 @@ export default function SettingsScreen() {
     ];
 
     return (
-        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} className="flex-1">
+        <LinearGradient colors={['#fffbf0', '#fff1f2', '#f0f9ff']} style={{ flex: 1 }}>
             {/* Header */}
-            <View className="px-4 pt-4 pb-3 flex-row items-center gap-3">
-                <TouchableOpacity onPress={() => router.back()} className="w-8 h-8 items-center justify-center">
+            <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity onPress={() => router.back()} style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
                     <ArrowLeft size={20} color="#3d405b" />
                 </TouchableOpacity>
                 <View>
-                    <Text className="text-2xl font-bold text-gray-800">Settings</Text>
-                    <Text className="text-xs text-gray-600">Manage your preferences</Text>
+                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1f2937' }}>Settings</Text>
+                    <Text style={{ fontSize: 12, color: '#4b5563' }}>Manage your preferences</Text>
                 </View>
             </View>
 
-            <ScrollView className="flex-1 px-4">
+            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }} contentContainerStyle={{ paddingTop: 10, paddingBottom: 20 }}>
                 {/* Menu Items */}
-                <View className="gap-2 mb-6">
+                <View style={{ gap: 8, marginBottom: 24 }}>
                     {menuItems.map((item) => (
                         <TouchableOpacity
                             key={item.id}
                             onPress={() => setActiveSection(item.id)}
-                            className="bg-white rounded-xl shadow p-4 flex-row items-center justify-between"
+                            style={{ backgroundColor: 'white', borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
                         >
-                            <View className="flex-row items-center gap-3 flex-1">
-                                <View className="w-10 h-10 rounded-xl items-center justify-center" style={{ backgroundColor: `${item.color}20` }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                                <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: `${item.color}20` }}>
                                     <item.icon size={20} color={item.color} />
                                 </View>
-                                <View className="flex-1">
-                                    <Text className="text-sm font-semibold text-gray-800">{item.label}</Text>
-                                    <Text className="text-xs text-gray-600">{item.description}</Text>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>{item.label}</Text>
+                                    <Text style={{ fontSize: 12, color: '#4b5563' }}>{item.description}</Text>
                                 </View>
                             </View>
                             <ChevronRight size={20} color="#9ca3af" />
@@ -157,56 +158,85 @@ export default function SettingsScreen() {
                     ))}
                 </View>
 
+                {/* Legal Links */}
+                <View style={{ gap: 8, marginBottom: 24 }}>
+                    <TouchableOpacity
+                        onPress={() => {
+                            WebBrowser.openBrowserAsync('https://heroic-biscochitos-1892b8.netlify.app/privacy-policy.html');
+                        }}
+                        style={{ backgroundColor: 'white', borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                    >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <Lock size={18} color="#6b7280" />
+                            <Text style={{ fontSize: 14, color: '#374151', fontWeight: '500' }}>Privacy Policy</Text>
+                        </View>
+                        <ChevronRight size={18} color="#9ca3af" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => {
+                            WebBrowser.openBrowserAsync('https://heroic-biscochitos-1892b8.netlify.app/terms-of-service.html');
+                        }}
+                        style={{ backgroundColor: 'white', borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                    >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <Heart size={18} color="#6b7280" />
+                            <Text style={{ fontSize: 14, color: '#374151', fontWeight: '500' }}>Terms of Service</Text>
+                        </View>
+                        <ChevronRight size={18} color="#9ca3af" />
+                    </TouchableOpacity>
+                </View>
+
                 {/* App Info */}
-                <View className="items-center pb-6">
-                    <Text className="text-xs text-gray-600">WonderTogether v1.0.0</Text>
-                    <Text className="text-xs text-gray-500">Made with love for couples who love to travel</Text>
+                <View style={{ alignItems: 'center', paddingBottom: 24 }}>
+                    <Text style={{ fontSize: 12, color: '#4b5563' }}>WonderTogether v1.0.0</Text>
+                    <Text style={{ fontSize: 12, color: '#6b7280' }}>Made with love for my Sassou ❤️</Text>
                 </View>
             </ScrollView>
 
             {/* Our Relationship Modal */}
             <Modal visible={activeSection === 'couple'} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-white rounded-t-3xl p-6" style={{ maxHeight: '80%' }}>
-                        <View className="flex-row items-center gap-2 mb-4">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                             <Heart size={20} color="#f43f5e" />
-                            <Text className="text-xl font-bold text-gray-800">Our Relationship</Text>
+                            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937' }}>Our Relationship</Text>
                         </View>
 
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            <View className="gap-4">
+                            <View style={{ gap: 16 }}>
                                 <View>
-                                    <Text className="text-sm text-gray-700 mb-1 font-medium">Couple Name</Text>
+                                    <Text style={{ fontSize: 14, color: '#374151', marginBottom: 4, fontWeight: '500' }}>Couple Name</Text>
                                     <TextInput
                                         value={coupleName}
                                         onChangeText={setCoupleName}
                                         placeholder="e.g., Alex & Jordan"
-                                        className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
+                                        style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, color: '#1f2937' }}
                                     />
-                                    <Text className="text-xs text-gray-500 mt-1">How you want to be referred to together</Text>
+                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>How you want to be referred to together</Text>
                                 </View>
 
                                 <View>
-                                    <View className="flex-row items-center gap-2 mb-1">
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                                         <Calendar size={14} color="#6b7280" />
-                                        <Text className="text-sm text-gray-700 font-medium">Anniversary Date</Text>
+                                        <Text style={{ fontSize: 14, color: '#374151', fontWeight: '500' }}>Anniversary Date</Text>
                                     </View>
                                     <TextInput
                                         value={anniversaryDate}
                                         onChangeText={setAnniversaryDate}
                                         placeholder="YYYY-MM-DD"
-                                        className="border border-gray-300 rounded-xl px-4 py-3 text-gray-800"
+                                        style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, color: '#1f2937' }}
                                     />
                                 </View>
 
                                 {couple && !couple.partner2_id && (
-                                    <View className="border-2 border-dashed border-terracotta/30 bg-terracotta/5 rounded-xl p-3">
-                                        <Text className="text-xs text-gray-600 mb-2 text-center">Invite your partner with this code:</Text>
-                                        <View className="flex-row items-center justify-center gap-2">
-                                            <Text className="text-2xl font-mono font-bold tracking-widest text-terracotta">
+                                    <View style={{ borderWidth: 2, borderStyle: 'dashed', borderColor: 'rgba(224, 122, 95, 0.3)', backgroundColor: 'rgba(224, 122, 95, 0.05)', borderRadius: 12, padding: 12 }}>
+                                        <Text style={{ fontSize: 12, color: '#4b5563', marginBottom: 8, textAlign: 'center' }}>Invite your partner with this code:</Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                                            <Text style={{ fontSize: 24, fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: 2, color: '#e07a5f' }}>
                                                 {couple.invite_code}
                                             </Text>
-                                            <TouchableOpacity onPress={copyInviteCode} className="p-2">
+                                            <TouchableOpacity onPress={copyInviteCode} style={{ padding: 8 }}>
                                                 {copied ? <Check size={16} color="#10b981" /> : <Copy size={16} color="#9ca3af" />}
                                             </TouchableOpacity>
                                         </View>
@@ -214,19 +244,19 @@ export default function SettingsScreen() {
                                 )}
                             </View>
 
-                            <View className="flex-row gap-3 mt-6">
+                            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
                                 <TouchableOpacity
                                     onPress={() => setActiveSection(null)}
-                                    className="flex-1 border border-gray-300 rounded-xl px-4 py-3 items-center"
+                                    style={{ flex: 1, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center' }}
                                 >
-                                    <Text className="text-gray-700 font-semibold">Cancel</Text>
+                                    <Text style={{ color: '#374151', fontWeight: '600' }}>Cancel</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     onPress={handleSaveCouple}
                                     disabled={loading}
-                                    className="flex-1 bg-terracotta rounded-xl px-4 py-3 items-center"
+                                    style={{ flex: 1, backgroundColor: '#e07a5f', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center' }}
                                 >
-                                    <Text className="text-white font-semibold">{loading ? 'Saving...' : 'Save'}</Text>
+                                    <Text style={{ color: 'white', fontWeight: '600' }}>{loading ? 'Saving...' : 'Save'}</Text>
                                 </TouchableOpacity>
                             </View>
                         </ScrollView>
@@ -236,34 +266,34 @@ export default function SettingsScreen() {
 
             {/* Notifications Modal */}
             <Modal visible={activeSection === 'notifications'} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-white rounded-t-3xl p-6">
-                        <View className="flex-row items-center gap-2 mb-4">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                             <Bell size={20} color="#f59e0b" />
-                            <Text className="text-xl font-bold text-gray-800">Notifications</Text>
+                            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937' }}>Notifications</Text>
                         </View>
 
-                        <View className="gap-4">
-                            <View className="flex-row items-center justify-between">
-                                <View className="flex-1">
-                                    <Text className="text-sm font-semibold text-gray-800">Trip Reminders</Text>
-                                    <Text className="text-xs text-gray-600">Get notified before upcoming trips</Text>
+                        <View style={{ gap: 16 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>Trip Reminders</Text>
+                                    <Text style={{ fontSize: 12, color: '#4b5563' }}>Get notified before upcoming trips</Text>
                                 </View>
                                 <Switch value={tripReminders} onValueChange={setTripReminders} />
                             </View>
 
-                            <View className="flex-row items-center justify-between">
-                                <View className="flex-1">
-                                    <Text className="text-sm font-semibold text-gray-800">Partner Activity</Text>
-                                    <Text className="text-xs text-gray-600">When your partner adds photos or trips</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>Partner Activity</Text>
+                                    <Text style={{ fontSize: 12, color: '#4b5563' }}>When your partner adds photos or trips</Text>
                                 </View>
                                 <Switch value={partnerActivity} onValueChange={setPartnerActivity} />
                             </View>
 
-                            <View className="flex-row items-center justify-between">
-                                <View className="flex-1">
-                                    <Text className="text-sm font-semibold text-gray-800">Flight Deals</Text>
-                                    <Text className="text-xs text-gray-600">Alerts for matched destinations</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>Flight Deals</Text>
+                                    <Text style={{ fontSize: 12, color: '#4b5563' }}>Alerts for matched destinations</Text>
                                 </View>
                                 <Switch value={flightDeals} onValueChange={setFlightDeals} />
                             </View>
@@ -271,9 +301,9 @@ export default function SettingsScreen() {
 
                         <TouchableOpacity
                             onPress={() => setActiveSection(null)}
-                            className="bg-terracotta rounded-xl px-4 py-3 items-center mt-6"
+                            style={{ backgroundColor: '#e07a5f', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', marginTop: 24 }}
                         >
-                            <Text className="text-white font-semibold">Done</Text>
+                            <Text style={{ color: 'white', fontWeight: '600' }}>Done</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -281,25 +311,24 @@ export default function SettingsScreen() {
 
             {/* Preferences Modal */}
             <Modal visible={activeSection === 'preferences'} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-white rounded-t-3xl p-6">
-                        <View className="flex-row items-center gap-2 mb-4">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                             <Globe size={20} color="#3b82f6" />
-                            <Text className="text-xl font-bold text-gray-800">Preferences</Text>
+                            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937' }}>Preferences</Text>
                         </View>
 
-                        <View className="gap-4">
+                        <View style={{ gap: 16 }}>
                             <View>
-                                <Text className="text-sm text-gray-700 mb-2 font-medium">Currency</Text>
-                                <View className="flex-row flex-wrap gap-2">
+                                <Text style={{ fontSize: 14, color: '#374151', marginBottom: 8, fontWeight: '500' }}>Currency</Text>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                                     {['USD', 'EUR', 'GBP', 'JPY'].map((c) => (
                                         <TouchableOpacity
                                             key={c}
                                             onPress={() => setCurrency(c)}
-                                            className={`px-4 py-2 rounded-lg border-2 ${currency === c ? 'border-terracotta bg-terracotta/10' : 'border-gray-200'
-                                                }`}
+                                            style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: currency === c ? '#e07a5f' : '#e5e7eb', backgroundColor: currency === c ? 'rgba(224, 122, 95, 0.1)' : 'transparent' }}
                                         >
-                                            <Text className={`text-sm font-semibold ${currency === c ? 'text-terracotta' : 'text-gray-700'}`}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: currency === c ? '#e07a5f' : '#374151' }}>
                                                 {c}
                                             </Text>
                                         </TouchableOpacity>
@@ -308,16 +337,15 @@ export default function SettingsScreen() {
                             </View>
 
                             <View>
-                                <Text className="text-sm text-gray-700 mb-2 font-medium">Units</Text>
-                                <View className="flex-row gap-2">
+                                <Text style={{ fontSize: 14, color: '#374151', marginBottom: 8, fontWeight: '500' }}>Units</Text>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
                                     {['metric', 'imperial'].map((u) => (
                                         <TouchableOpacity
                                             key={u}
                                             onPress={() => setUnits(u)}
-                                            className={`flex-1 px-4 py-3 rounded-lg border-2 items-center ${units === u ? 'border-terracotta bg-terracotta/10' : 'border-gray-200'
-                                                }`}
+                                            style={{ flex: 1, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, borderWidth: 2, alignItems: 'center', borderColor: units === u ? '#e07a5f' : '#e5e7eb', backgroundColor: units === u ? 'rgba(224, 122, 95, 0.1)' : 'transparent' }}
                                         >
-                                            <Text className={`text-sm font-semibold capitalize ${units === u ? 'text-terracotta' : 'text-gray-700'}`}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', textTransform: 'capitalize', color: units === u ? '#e07a5f' : '#374151' }}>
                                                 {u}
                                             </Text>
                                         </TouchableOpacity>
@@ -328,9 +356,9 @@ export default function SettingsScreen() {
 
                         <TouchableOpacity
                             onPress={() => setActiveSection(null)}
-                            className="bg-terracotta rounded-xl px-4 py-3 items-center mt-6"
+                            style={{ backgroundColor: '#e07a5f', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', marginTop: 24 }}
                         >
-                            <Text className="text-white font-semibold">Save Preferences</Text>
+                            <Text style={{ color: 'white', fontWeight: '600' }}>Save Preferences</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -338,46 +366,46 @@ export default function SettingsScreen() {
 
             {/* Account Modal */}
             <Modal visible={activeSection === 'account'} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-white rounded-t-3xl p-6">
-                        <View className="flex-row items-center gap-2 mb-4">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                             <User size={20} color="#64748b" />
-                            <Text className="text-xl font-bold text-gray-800">Account</Text>
+                            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937' }}>Account</Text>
                         </View>
 
-                        <View className="gap-4">
+                        <View style={{ gap: 16 }}>
                             <View>
-                                <Text className="text-sm text-gray-700 mb-1 font-medium">Email</Text>
+                                <Text style={{ fontSize: 14, color: '#374151', marginBottom: 4, fontWeight: '500' }}>Email</Text>
                                 <TextInput
                                     value={user?.email || ''}
                                     editable={false}
-                                    className="border border-gray-300 rounded-xl px-4 py-3 text-gray-500 bg-gray-100"
+                                    style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, color: '#6b7280', backgroundColor: '#f3f4f6' }}
                                 />
                             </View>
 
                             <TouchableOpacity
                                 disabled
-                                className="flex-row items-center justify-center gap-2 border border-gray-300 rounded-xl px-4 py-3 bg-gray-100"
+                                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#f3f4f6' }}
                             >
                                 <Lock size={16} color="#9ca3af" />
-                                <Text className="text-gray-500 font-semibold">Change Password</Text>
+                                <Text style={{ color: '#6b7280', fontWeight: '600' }}>Change Password</Text>
                             </TouchableOpacity>
 
                             {/* Danger Zone */}
-                            <View className="border-2 border-red-200 bg-red-50 rounded-xl p-4 mt-4">
-                                <View className="flex-row items-start gap-3">
+                            <View style={{ borderWidth: 2, borderColor: '#fecaca', backgroundColor: '#fef2f2', borderRadius: 12, padding: 16, marginTop: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                                     <AlertTriangle size={20} color="#ef4444" />
-                                    <View className="flex-1">
-                                        <Text className="text-sm font-semibold text-red-700">Danger Zone</Text>
-                                        <Text className="text-xs text-red-600 mt-1">
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#b91c1c' }}>Danger Zone</Text>
+                                        <Text style={{ fontSize: 12, color: '#dc2626', marginTop: 4 }}>
                                             Deleting your account will remove all your data permanently.
                                         </Text>
                                         <TouchableOpacity
                                             onPress={handleDeleteAccount}
-                                            className="bg-red-600 rounded-lg px-4 py-2 flex-row items-center gap-2 mt-3"
+                                            style={{ backgroundColor: '#dc2626', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
                                         >
                                             <Trash2 size={14} color="white" />
-                                            <Text className="text-white font-semibold text-sm">Delete Account</Text>
+                                            <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>Delete Account</Text>
                                         </TouchableOpacity>
                                     </View>
                                 </View>
@@ -386,9 +414,9 @@ export default function SettingsScreen() {
 
                         <TouchableOpacity
                             onPress={() => setActiveSection(null)}
-                            className="border border-gray-300 rounded-xl px-4 py-3 items-center mt-6"
+                            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', marginTop: 24 }}
                         >
-                            <Text className="text-gray-700 font-semibold">Close</Text>
+                            <Text style={{ color: '#374151', fontWeight: '600' }}>Close</Text>
                         </TouchableOpacity>
                     </View>
                 </View>

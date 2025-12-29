@@ -1,0 +1,47 @@
+{
+    "cli": {
+        "version": ">= 13.2.0"
+    },
+    "build": {
+        "development": {
+            "developmentClient": true,
+            "distribution": "internal",
+            "ios": {
+                "simulator": true
+            }
+        },
+        "preview": {
+            "distribution": "internal",
+            "ios": {
+                "simulator": false
+            },
+            "android": {
+                "buildType": "apk"
+            }
+        },
+        "production": {
+            "env": {
+                "APP_ENV": "production"
+            },
+            "ios": {
+                "buildConfiguration": "Release"
+            },
+            "android": {
+                "buildType": "app-bundle"
+            }
+        }
+    },
+    "submit": {
+        "production": {
+            "ios": {
+                "appleId": "luyasuseb@icloud.com",
+                "ascAppId": "6756939756",
+                "appleTeamId": "CRG3WF69VC"
+            },
+            "android": {
+                "serviceAccountKeyPath": "./path-to-service-account.json",
+                "track": "internal"
+            }
+        }
+    }
+}
